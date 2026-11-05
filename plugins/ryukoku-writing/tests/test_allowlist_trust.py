@@ -1,6 +1,6 @@
-"""Regressions from the second round of independent adversarial verification: the allow-list of commands that run
-without asking, a renamed copy of the evidence notebook, the CI trust root and key revocation, heading numbers,
-and smaller findings. Each finding's reproduction became a test here."""
+"""The allow-list of commands that run without asking, a renamed copy of the evidence notebook, the CI trust root and
+key revocation, heading numbers, and smaller cases. Each test reproduces a way around a safeguard that an independent
+adversarial review found."""
 import json
 import os
 import shutil
@@ -339,7 +339,7 @@ class HeadingNumbers(unittest.TestCase):
         self.assertFalse(self.H("# 方法", "## 方法"))
 
 
-# ------------------------------------------------------------ smaller findings
+# ------------------------------------------------------------ smaller cases
 class Misc(Base):
     def test_screen_comments_are_the_students_only(self):
         from notebook.server import make_server

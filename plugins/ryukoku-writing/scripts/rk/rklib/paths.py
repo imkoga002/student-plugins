@@ -4,7 +4,7 @@ them on a fixed list (tests/test_v2.Hardening.test_path_classes_agree_with_the_h
 
 classify(rel) takes a path relative to the project (or absolute, outside it) and returns one of:
   statehome claude runconfig startup manuscript ryukoku tools questions searchlog thinking statement disclosure
-  annotations ledger bibliography raw ci proposals claims verification research other
+  annotations ledger bibliography raw ci pandoc proposals claims verification research other
 """
 import fnmatch
 import os
@@ -33,16 +33,18 @@ RULES = (
     ("ledger", ("*/sources/register.csv", "*/sources/claims.csv")),
     ("bibliography", ("*/sources/references.json",)),
     ("raw", ("*/data/raw/*",)),
-    ("ci", ("*/.github/*", "*/.githooks/*", "*/.git/hooks/*")),
+    ("ci", ("*/.github/*", "*/.githooks/*", "*/.git/hooks/*", "*/.github", "*/.githooks")),
+    ("pandoc", ("*/pandoc/*", "*/pandoc")),
     ("proposals", ("*/proposals/*",)),
     ("claims", ("*/claims/*",)),
     ("verification", ("*/review/verification/*",)),
     ("research", ("*/research/*", "*/sources/*", "*/review/*", "*/excerpts/*")),
 )
 # classes a shell write must never reach (the Write/Edit gate denies them too; manuscript follows the policy there,
-# but from the shell it is always denied)
+# but from the shell it is always denied). ci (.github/, .githooks/) and pandoc/ (the export settings) are the
+# student's to change: the AI never writes them
 PROTECTED = {"statehome", "claude", "runconfig", "startup", "manuscript", "ryukoku", "tools", "questions", "searchlog",
-             "thinking", "disclosure", "annotations", "ledger", "raw", "statement"}
+             "thinking", "disclosure", "annotations", "ledger", "raw", "statement", "ci", "pandoc"}
 # file names that are protected wherever the directory is unknown (a cd the scanner could not follow)
 PROTECTED_NAMES = {"signoffs.jsonl", "provenance.jsonl", "ai-use-log.jsonl", "config.yml", "signers.json", "style.yml",
                    "questions.md", "search-log.jsonl", "annotations.json", "annotations-log.jsonl", "register.csv",

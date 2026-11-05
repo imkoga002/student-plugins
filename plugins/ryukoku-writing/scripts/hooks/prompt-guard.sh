@@ -22,8 +22,11 @@ P="$(printf '%s' "$INPUT" | json_string_field prompt)"
 [ -n "$P" ] || exit 0
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$HERE/../.." && pwd)}"
 RK_HOOKCORE="$PLUGIN_ROOT/scripts/rk/hookcore.py"; export RK_HOOKCORE
+# a new prompt ends the previous turn: a tool window still open got no PostToolUse (declined or failed); close it and
+# count what changed while it was open as uncertain (msguard.turn_end)
+have_python && pyrun -I -B "$RK_HOOKCORE" turnend "$PROJ" >/dev/null 2>&1
 FB_LANG="$(cfg_get feedback_lang)"; [ -n "$FB_LANG" ] || FB_LANG="$(cfg_get manuscript_lang)"
-POLICY="$(cfg_get ai_policy)"; [ -n "$POLICY" ] || POLICY=unknown
+CFG_BAD=""; POLICY=unreadable; cfg_policy
 TAG="[ryukoku-writing]"
 
 # 1. personal data
@@ -94,6 +97,7 @@ case "$POLICY" in
   allowed) PWRITE="$(t "科目の AI 利用条件は allowed(原稿の執筆・修正をしてよい)。" "The course AI policy is allowed (drafting and revising the manuscript is permitted).")" ;;
   limited) PWRITE="$(t "科目の AI 利用条件は limited(許可された用途: $(cfg_get ai_allowed_uses))。原稿に書く前に確認が出るので、学生にシラバスや教員の指示で執筆が許される範囲かを確かめてもらう。" "The course AI policy is limited (allowed uses: $(cfg_get ai_allowed_uses)). Each manuscript write asks first: the student checks whether the syllabus or instructor allows AI writing.")" ;;
   prohibited) PWRITE="$(t "科目の AI 利用条件は prohibited。原稿は書かない(フックが止める)。理由を一文で伝え、できること(検証・調査・形式の確認、考えを整理する問いかけ)を示す。" "The course AI policy is prohibited: do not write the manuscript (the hooks block it). Say why in one sentence and offer what remains (verification, research, format checks, questions that help the student think).")" ;;
+  unreadable) PWRITE="$(t "このプロジェクトの設定(.ryukoku/config.yml)を読めない。原稿には書けない(フックが止める)。学生に ./rk check で原因を確かめ、./rk setup で直してもらう。" "This project's settings (.ryukoku/config.yml) cannot be read, so the manuscript cannot be written (the hooks deny it). Ask the student to check ./rk check and fix it with ./rk setup.")" ;;
   *) PWRITE="$(t "科目の AI 利用条件が未確認(unknown)。原稿に書く前に確認が出る。まず学生に、シラバスで AI の執筆が許されているかを確かめるよう一度伝える(ガイドラインⅢ-3)。" "The course AI policy is unknown. Each manuscript write asks first; tell the student once to check whether the syllabus allows AI writing (guideline III-3).")" ;;
 esac
 MSG=""

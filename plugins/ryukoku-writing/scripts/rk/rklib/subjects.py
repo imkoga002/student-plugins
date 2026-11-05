@@ -290,15 +290,20 @@ def _plugin_root():
         return None
 
 
+PANDOC_UNGUARDED = "pandoc/reference.docx"
+
+
 def guarded_files(proj, base_ref=None):
     """{rel path: sha or 'deleted'} of the guarded files that differ from the plugin (or the base branch)."""
     from .common import run_git
     out = {}
     if base_ref:
         r = run_git(proj, ["diff", "--name-only", "%s...HEAD" % base_ref, "--", "tools", "rk", "rk.cmd", "rk.ps1",
-                           ".github", ".githooks"], timeout=30)
+                           ".github", ".githooks", "pandoc"], timeout=30)
         names = [x.strip() for x in r.stdout.splitlines() if x.strip()] if (r is not None and r.returncode == 0) else []
         for n in names:
+            if n == PANDOC_UNGUARDED:
+                continue
             p = os.path.join(proj, n)
             out[n] = sha256_file(p) if os.path.isfile(p) else "deleted"
         return out
@@ -323,6 +328,21 @@ def guarded_files(proj, base_ref=None):
                         pairs.append((prefix + "/" + r, os.path.join(shipped, r)))
     for name in ("rk", "rk.cmd", "rk.ps1"):
         pairs.append((name, os.path.join(root, "scripts", "rk", "launchers", name)))
+    # pandoc/: the export settings of both languages (init copies both); the reference.docx the student makes with
+    # pandoc holds styles and is not compared
+    seen = set()
+    for lang in ("ja", "en"):
+        sd = os.path.join(root, "templates", lang, "pandoc")
+        for fn in sorted(os.listdir(sd)) if os.path.isdir(sd) else []:
+            seen.add(fn)
+            pairs.append(("pandoc/" + fn, os.path.join(sd, fn)))
+    pd = os.path.join(proj, "pandoc")
+    if os.path.isdir(pd):
+        for dp, dns, fns in os.walk(pd):
+            for fn in fns:
+                r = os.path.relpath(os.path.join(dp, fn), pd).replace(os.sep, "/")
+                if r not in seen and "pandoc/" + r != PANDOC_UNGUARDED:
+                    pairs.append(("pandoc/" + r, os.path.join(root, "templates", "ja", "pandoc", "__absent__", r)))
     for relp, ship in pairs:
         mine = os.path.join(proj, relp)
         a = sha256_file(mine) if os.path.isfile(mine) else "deleted"
@@ -338,7 +358,7 @@ def guarded_subject(proj, base_ref=None):
     files = guarded_files(proj, base_ref)
     sid = "pr" if base_ref else "tools"
     obj = {"kind": "guarded", "scope": sid, "files": sorted(files), "sha": files}
-    return Subject("guarded", sid, _d(obj), "道具・CI の設定の変更 %d 件" % len(files),
+    return Subject("guarded", sid, _d(obj), "道具・CI・書き出しの設定の変更 %d 件" % len(files),
                    {"scope": sid, "files": sorted(files), "sha": files, "base_ref": base_ref or ""}, "")
 
 

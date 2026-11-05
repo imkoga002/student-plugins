@@ -355,17 +355,28 @@ def require_tty(lang="ja"):
             " Open a terminal and type the same command.")
 
 
+# The console device: what is written there is not part of the process's standard output (which an AI tool call
+# captures). On Windows it is CONOUT$ / CONIN$; if it cannot be opened, nothing secret is printed (SignError).
+TTY_OUT = "CONOUT$" if os.name == "nt" else "/dev/tty"
+TTY_IN = "CONIN$" if os.name == "nt" else "/dev/tty"
+
+
 def tty_print(msg=""):
-    if os.name == "nt":
-        print(msg, flush=True)
-        return
-    with open("/dev/tty", "w", encoding="utf-8", errors="replace") as t:
+    try:
+        t = open(TTY_OUT, "w", encoding="utf-8", errors="replace")
+    except OSError:
+        raise SignError("端末(コンソール)に書けないので表示しない。自分の端末で実行する / cannot write to the console; run this in your own terminal")
+    with t:
         t.write(msg + "\n")
 
 
 def tty_input(prompt):
     if os.name == "nt":
-        return input(prompt)
+        with open(TTY_OUT, "w", encoding="utf-8", errors="replace") as out:
+            out.write(prompt)
+            out.flush()
+        with open(TTY_IN, "r", encoding="utf-8", errors="replace") as inp:
+            return inp.readline().rstrip("\r\n")
     with open("/dev/tty", "w", encoding="utf-8", errors="replace") as out:
         out.write(prompt)
         out.flush()

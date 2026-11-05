@@ -13,7 +13,8 @@ description: "文献の実在確認(識別子 → 解決 → メタデータ照�
 ## 状態
 - 機械(AI の道具が付ける): IDENTITY_CONFIRMED(識別子が解決し、題名・著者・年が一致)/ NOT_FOUND / METADATA_MISMATCH / RETRACTED / CANDIDATE(照合する項目が足りない・未確認)。通信の失敗は状態を付けない
 - 人間(学生だけが付ける): 文献 VERIFIED / REJECTED、主張 VERIFIED / CONTRADICTED / NOT_FOUND。VERIFIED は原典を読んだという宣言なので合言葉の署名、それ以外は画面か端末の確認
-- 原稿に引用する文献は、台帳で IDENTITY_CONFIRMED 以上であること。台帳にない・それ未満のものを引くと、提出の段階の検査が通らない(下書きの段階では注意)。識別子の無い資料(古い本など)は、NCID・NDL ID などの識別子を台帳に足して確かめる。それでも確かめられない資料は、提出の段階では引けない。書き出し(export)も同じ規則で止まる。front matter の nocite(`@*` は references.json のすべて)も対象
+- 原稿に引用する文献は、台帳で IDENTITY_CONFIRMED 以上であること。台帳にない・それ未満のものを引くと、提出の段階の検査が通らない(下書きの段階では注意)。識別子の無い資料(古い本など)は、NCID・NDL ID などの識別子を台帳に足して確かめる。それでも確かめられない資料は、提出の段階では引けない。書き出し(export)も同じ規則で止まる。front matter の nocite(`@*` は references.json のすべて)も対象。引用キーは pandoc の規則で読む(`[@山田2020]` のような漢字・かなのキーも)
+- 文献一覧は `sources/references.json` だけから作る。その項目(DOI・ISBN・題名・年・著者)は台帳の記録と同じでなければならない(違えば提出の検査と書き出しのエラー)。references.json を書くときは、台帳の記録をそのまま写し、記憶から補わない
 - 題名なし、題名の一語だけ、ISBN のチェックディジットだけ、では IDENTITY_CONFIRMED にならない
 
 ## 手順

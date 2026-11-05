@@ -201,6 +201,11 @@ def sanitize_defaults(path, proj):
                 bad.append("%s(プロジェクトの外)" % key)
             elif not v.lower().endswith(PATH_EXT[key]):
                 bad.append("%s(拡張子 / extension)" % key)
+            elif key == "bibliography" and os.path.realpath(os.path.join(proj, v)) != os.path.realpath(os.path.join(proj, "sources", "references.json")):
+                # the printed bibliography is the one whose entries are compared with the ledger
+                bad.append("bibliography(sources/references.json だけ / only sources/references.json)")
+            elif key == "csl" and not os.path.realpath(os.path.join(proj, v)).startswith(os.path.realpath(os.path.join(proj, "pandoc")) + os.sep):
+                bad.append("csl(pandoc/ の中だけ / only inside pandoc/)")
             else:
                 # absolute, because pandoc runs outside the project (see the module docstring)
                 safe[key] = os.path.realpath(os.path.join(proj, v))
@@ -275,16 +280,41 @@ def build(proj, fmt="docx", out=None, files=None):
     # as rk check --submit); a sample file outside manuscript/ (examples/...) is exported with a warning only
     from . import citations
     srcs = files or manuscript_sources(proj)
+    # the bibliography is sources/references.json only: a front matter that names another one (or inline references,
+    # or another style) would print entries nobody compared with the ledger
+    for p in srcs:
+        ov = citations.front_matter_overrides(read_text(p))
+        if ov:
+            raise RkError(tr(feedback_lang(proj),
+                "書き出さなかった: %s の front matter に %s がある。文献一覧は sources/references.json だけから、書式は pandoc/ の設定から作る。"
+                "その行を消してから書き出す。" % (os.path.relpath(p, proj), ", ".join(ov)),
+                "Not exported: the front matter of %s sets %s. The bibliography comes from sources/references.json only and its style "
+                "from the pandoc/ settings. Remove that line and export again." % (os.path.relpath(p, proj), ", ".join(ov))))
+    # the export settings are the student's: a change from the shipped copies needs the student's confirmation
+    from . import sign, subjects, trust
+    g = subjects.guarded_subject(proj)
+    pchanged = sorted(k for k in g.content["files"] if k.startswith("pandoc/"))
+    if pchanged:
+        trusted, _p, _n = trust.local_trusted(proj)
+        idx, _b = sign.valid_index(proj, trusted)
+        if not sign.current(idx, "guarded", g.sid, g.digest):
+            raise RkError(tr(feedback_lang(proj),
+                "書き出さなかった: 書き出しの設定(%s)が Plugin の写しと違い、本人の確認がない。自分で中身を確かめ、意図した変更なら"
+                "自分の端末で ./rk sign guarded tools --decision confirmed で確認する(AI は pandoc/ を書かない)。" % ", ".join(pchanged[:6]),
+                "Not exported: the export settings (%s) differ from the plugin's copies and you have not confirmed them. Read them; if the "
+                "change is intended, confirm it in your terminal with ./rk sign guarded tools --decision confirmed (the AI does not write pandoc/)."
+                % ", ".join(pchanged[:6])))
     ms_dir = os.path.realpath(os.path.join(proj, "manuscript")) + os.sep
     if any(os.path.realpath(p).startswith(ms_dir) for p in srcs):
         keys, _star = citations.rendered(proj, [read_text(p) for p in srcs if os.path.realpath(p).startswith(ms_dir)])
         probs = citations.problems(proj, keys)
         if probs:
             raise RkError(tr(feedback_lang(proj),
-                "書き出さなかった: 原稿が出す参考文献のうち、台帳にない・IDENTITY_CONFIRMED 未満のものがある(%s)。"
-                "rk.py refcheck check で確かめるか、引用から外す。" % ", ".join("%s(%s)" % kv for kv in probs[:8]),
-                "Not exported: bibliography entries the manuscript renders are missing from the ledger or below IDENTITY_CONFIRMED (%s). "
-                "Check them with rk.py refcheck check, or remove the citations." % ", ".join("%s (%s)" % kv for kv in probs[:8])))
+                "書き出さなかった: 原稿が出す参考文献のうち、台帳にない・IDENTITY_CONFIRMED 未満・文献一覧の項目が台帳と違う(mismatch)ものがある(%s)。"
+                "rk.py refcheck check で確かめるか、sources/references.json の項目を台帳に合わせるか、引用から外す。" % ", ".join("%s(%s)" % kv for kv in probs[:8]),
+                "Not exported: bibliography entries the manuscript renders are missing from the ledger, below IDENTITY_CONFIRMED, or differ from "
+                "the ledger (mismatch) (%s). Check them with rk.py refcheck check, make the entry in sources/references.json match the ledger, "
+                "or remove the citations." % ", ".join("%s (%s)" % kv for kv in probs[:8])))
     if fmt == "docx" and not os.path.exists(os.path.join(proj, "pandoc", "reference.docx")):
         raise RkError("pandoc/reference.docx がない。作り方: pandoc -o pandoc/reference.docx --print-default-data-file reference.docx")
     if fmt == "pdf":

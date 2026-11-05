@@ -27,8 +27,10 @@ Watched
                review/annotations-log.jsonl
 Each window keeps its own snapshot (state/<project>/windows/<tool_use_id>.json) and compares against it, so code
 that rewrites the shared baseline during the call does not hide its change. A window opened for a call that
-asks the student first is "pending": it is dropped at the next tool call when no PostToolUse came (the student
-declined), so the student's own edits after a declined call are not reported as AI changes.
+asks the student first stays open like any other until its PostToolUse: tool calls can overlap (a second call's
+PreToolUse may come before the first one's PostToolUse), and while any window is open every change is the AI's. At
+the end of the turn (Stop, or the next prompt) a window still open got no PostToolUse (declined or failed); it is
+closed and what changed while it was open is recorded as uncertain and counted with the AI's (README).
 Every detection is appended to the hash-chained AI-use log (committed) and to a witness list outside the project:
 `rk check` fails locally and in CI until the student signs a decision (kept as AI involvement / it was my own edit
 / reverted), and locally when a detection on the witness list is missing from the log (so deleting the line and
@@ -268,13 +270,8 @@ def pre(proj, tool_use_id="", mode="run"):
             os.remove(_wpath(st, k))
         except OSError:
             pass
-    for k in [k for k, v in w.items() if v.get("ask")]:
-        w.pop(k)  # a call that asked and got no PostToolUse was declined
-        shutil.rmtree(_wdir(st, k), ignore_errors=True)
-        try:
-            os.remove(_wpath(st, k))
-        except OSError:
-            pass
+    # a window that asked the student stays open until its PostToolUse (calls may overlap: the next call's
+    # PreToolUse can come before this one's PostToolUse). Declined calls are closed at the end of the turn (turn_end)
     old = _load(os.path.join(st, "baseline.json"), None)
     if not w or old is None or "append" not in old:
         if not w:
@@ -299,6 +296,29 @@ def pre(proj, tool_use_id="", mode="run"):
         except OSError:
             pass
     return {"ok": True}
+
+
+def turn_end(proj):
+    """End of a turn (Stop, or the next UserPromptSubmit): every tool call of the turn has finished, so a window that
+    is still open got no PostToolUse (the student declined it, or the call failed). It is closed; whatever changed
+    while it was open is recorded as uncertain (counted with the AI's), because the call may have run."""
+    st = state_dir(proj)
+    raw = _load(os.path.join(st, "open.json"), {})
+    if not raw:
+        return {"closed": 0}
+    for k in list(raw):
+        shutil.rmtree(_wdir(st, k), ignore_errors=True)
+        try:
+            os.remove(_wpath(st, k))
+        except OSError:
+            pass
+    _save(os.path.join(st, "open.json"), {})
+    try:
+        provenance.sync_student(proj, uncertain=True)
+    except OSError:
+        pass
+    _baseline(proj, st, _load(os.path.join(st, "baseline.json"), None))
+    return {"closed": len(raw)}
 
 
 def _new_records(proj, ref):

@@ -1,6 +1,9 @@
-"""Regressions from the first round of independent adversarial verification: each finding's reproduction became a
-test here, named after the defect it checks. The probes are built the way the verifier's probes were (a script the AI
-writes and runs, a fake notebook, CI and API calls). The proposal allow-list is in test_proposals.AllowList."""
+"""Safeguards against the AI posing as the student or erasing what it did: the human-only commands and the notebook,
+the command allow-list (execgate), where the passphrase may be typed, the change-detection layer, every tool going
+through the hooks, Claude Code's own settings, the CI trust root, portability of the hooks, comments and logs, and
+batch signing. Each test reproduces a way around a safeguard that independent adversarial reviews found, the way
+those probes were built (a script the AI writes and runs, a fake notebook, CI and API calls). The proposal allow-list
+is in test_proposals.AllowList."""
 import json
 import os
 import shlex
@@ -490,7 +493,7 @@ class BatchSigning(Base):
         self.assertEqual(App(self.P, 0).view("hunk", h.sid)["decisions"], ["rejected"])
 
 
-# ------------------------------------------------------------ smaller findings
+# ------------------------------------------------------------ smaller cases
 class Misc(Base):
     def test_prohibited_course_allows_reading_but_not_writing(self):
         # v2: a prohibited course still allows verification and format checks, which need reading; writing the

@@ -12,13 +12,15 @@
 #          the tools and launchers (tools/, rk, rk.cmd, rk.ps1), research/questions.md, the search log, thinking/,
 #          disclosure/ (except the statement draft), review/annotations*, the ledgers, data/raw/, the per-user state
 #          folder (~/.ryukoku-writing), Claude Code's settings and plugins (.claude/ in the project and in the home
-#          folder) and the plugin itself; running a human-only command; starting the evidence notebook from anywhere
+#          folder) and the plugin itself; CI and Git hooks (.github/, .githooks/); the export settings (pandoc/);
+#          running a human-only command; starting the evidence notebook from anywhere
 #          but the installed plugin (checked on the parsed command: quotes and argument order do not matter);
-#          terminal emulation and detached jobs; calls to the notebook's local API; git push to main/master.
+#          terminal emulation and detached jobs; connections to this computer (the notebook's local API);
+#          git push to main/master; manuscript writes when .ryukoku/config.yml cannot be trusted (cfg_policy).
 #   ask  : running code the AI wrote (a script it wrote or changed, code given inline to an interpreter, a file
 #          that changed during this session, or a file it cannot determine) - that code runs with the student's
-#          rights and could do anything the student can, including faking the passphrase prompt; CI/Git-hook
-#          files; any other git push; personal data in written content or queries; uses outside the course's
+#          rights and could do anything the student can, including faking the passphrase prompt; any
+#          other git push; personal data in written content or queries; uses outside the course's
 #          allowed AI uses (ai_policy: limited); background runs (run_in_background, Monitor).
 # Every tool goes through this hook (matcher "*"). Read-only tools open no detection window; a tool this hook does
 # not know opens one, and one that carries a "command" (PowerShell, Monitor, ...) is checked like Bash.
@@ -75,26 +77,19 @@ if ! is_active "$PROJ"; then
   exit 0
 fi
 FB_LANG="$(cfg_get feedback_lang)"; [ -n "$FB_LANG" ] || FB_LANG="$(cfg_get manuscript_lang)"
-POLICY="$(cfg_get ai_policy)"
 USES="$(cfg_get ai_allowed_uses | LC_ALL=C tr 'A-Z' 'a-z')"
-# the settings must be readable and say exactly one of the four policies; otherwise nothing is assumed (writes closed)
-CFG_BAD=""
-CFGF="$PROJ/.ryukoku/config.yml"
-if [ ! -f "$CFGF" ]; then CFG_BAD=missing
-elif [ ! -r "$CFGF" ]; then CFG_BAD=unreadable
-elif [ "$(cfg_count ai_policy)" != 1 ]; then CFG_BAD="ai_policy x$(cfg_count ai_policy)"
-else
-  case "$POLICY" in allowed|limited|prohibited|unknown) ;; *) CFG_BAD="ai_policy=$POLICY" ;; esac
-fi
-[ -n "$CFG_BAD" ] && POLICY=unreadable
+# the settings must be UTF-8 and say exactly one of the four policies in the one accepted form; otherwise nothing is
+# assumed (writes closed). The same decision as rk check (common.config_problems), via hookcore cfgcheck
+CFG_BAD=""; POLICY=unreadable
+cfg_policy
 OUTSIDE=""
 if [ "$(phys_dir "$BASE" 2>/dev/null || printf '%s' "$BASE")" != "$(phys_dir "$PROJ" 2>/dev/null || printf '%s' "$PROJ")" ]; then
   OUTSIDE="$(t " / Claude Code がプロジェクトの外($BASE)で開かれている。プロジェクトのフォルダ($PROJ)で開き直すと、記録と検知が正しく働く。" " / Claude Code is open outside the project ($BASE). Reopen it in the project folder ($PROJ) so recording and detection work properly.")"
 fi
 
 # ---- structural layer: remember the protected state before a tool that may write runs (only if it may run).
-# MODE ask: the student is asked first; the window counts only if the tool really runs (a declined
-# call leaves no window).
+# MODE ask: the student is asked first; the window stays open until its PostToolUse, or until the turn ends
+# (msguard.turn_end: a call that got no PostToolUse was declined or failed; changes meanwhile count as uncertain).
 guard_pre() {
   case "$KIND" in
     write|shell|other)
@@ -116,7 +111,7 @@ WHY_MS_UNKNOWN="$(t "科目の AI 利用条件が未確認(ai_policy: unknown)�
 WHY_HUMAN="$(t "このファイルは人間の判断の記録か、それを守る設定・道具(署名者、判断の記録、AI 利用記録、由来の記録、承認済みの記法、設定、検査の道具)。人間の判断は学生が画面か端末で記録したときだけ成立する(VERIFIED と最終確認は合言葉の署名)。AI が書くと人間の確認を装うか、記録の正しさを崩すことになるので止めた。学生には、証拠ノートの画面か './rk <コマンド>' を案内する。" \
 "This file holds human decisions or what protects them (signers, decision records, the AI-use log, provenance, approved style rules, settings, checking tools). Human decisions count only when the student records them on the screen or at the terminal (VERIFIED and the final confirmation with a passphrase signature). An AI write would impersonate a confirmation or corrupt the record, so it is blocked. Point the student to the evidence notebook or './rk <command>'.")"
 
-WHY_STARTUP="$(t "シェルの起動ファイル・PATH 上のディレクトリ(~/.local/bin など)・自動起動・エディタのタスク(.vscode)・.envrc は AI が書かない。学生が次に端末を開いたり ./rk を動かしたりしたときに、確認なしでコードが動いてしまうため(検証の新規の指摘 3)。" "The AI does not write shell startup files, directories on PATH (~/.local/bin, ...), autostart entries, editor tasks (.vscode) or .envrc: they would run code without a prompt the next time the student opens a terminal or runs ./rk.")"
+WHY_STARTUP="$(t "シェルの起動ファイル・PATH 上のディレクトリ(~/.local/bin など)・自動起動・エディタのタスク(.vscode)・.envrc は AI が書かない。学生が次に端末を開いたり ./rk を動かしたりしたときに、確認なしでコードが動いてしまうため。" "The AI does not write shell startup files, directories on PATH (~/.local/bin, ...), autostart entries, editor tasks (.vscode) or .envrc: they would run code without a prompt the next time the student opens a terminal or runs ./rk.")"
 
 manuscript_gate() { # Write/Edit to manuscript/: the course AI policy decides (no readable settings: closed)
   [ -n "$CFG_BAD" ] && deny_out "$(t "このプロジェクトの設定(.ryukoku/config.yml)が見つからないか、読めないか、科目の AI 利用条件がちょうど一つの正しい値(allowed・limited・prohibited・unknown)になっていない($CFG_BAD)。条件を確かめられないので、原稿には書かない。学生に ./rk check で原因を確かめ、./rk setup で直してもらう。" "This project's settings (.ryukoku/config.yml) are missing or unreadable, or the course AI policy is not exactly one valid value (allowed, limited, prohibited, unknown) ($CFG_BAD). The policy cannot be checked, so the AI does not write the manuscript. Ask the student to look at ./rk check and fix it with ./rk setup.")"
@@ -134,6 +129,8 @@ deny_class() { # CLASS -> deny with the matching explanation
     ryukoku|disclosure|statehome) deny_out "$WHY_HUMAN" ;;
     statement) deny_out "$(t "開示文の下書き(disclosure/statement*.md)は Write・Edit で書く(シェルからは書かない)。" "Write the disclosure statement draft (disclosure/statement*.md) with Write/Edit, not from the shell.")" ;;
     startup) deny_out "$WHY_STARTUP" ;;
+    ci) deny_out "$(t "CI と Git フックの設定(.github/・.githooks/)は AI が書かない。検査を弱められるため(CI は基準ブランチの道具で検査し、PR での変更はエラーになる)。変更は学生が AI の外で自分で行い、./rk sign guarded tools --decision confirmed で確かめる。" "CI and Git-hook settings (.github/, .githooks/) are not written by the AI: they could weaken the checks (CI checks with the base branch's tools and flags such changes in a PR). The student makes such changes outside the AI and confirms them with ./rk sign guarded tools --decision confirmed.")" ;;
+    pandoc) deny_out "$(t "書き出しの設定(pandoc/: defaults・テンプレート・CSL)は AI が書かない。文献一覧の出し方や書き出す内容を変えられるため。変更は学生が AI の外で自分で行い、./rk sign guarded tools --decision confirmed で確かめる(確かめるまで書き出しは止まる)。" "The export settings (pandoc/: defaults, templates, CSL) are not written by the AI: they could change how the bibliography or the document is printed. The student makes such changes outside the AI and confirms them with ./rk sign guarded tools --decision confirmed (export stops until then).")" ;;
     tools|plugin) deny_out "$(t "検査・記録の道具(tools/、./rk の起動ファイル、Plugin 本体、~/.ryukoku-writing)は AI が書き換えない。守りを外すことになり、学生が合言葉を入れるコードの行き先を変えられるため。" "The checking and recording tools (tools/, the ./rk launchers, the plugin itself, ~/.ryukoku-writing) are not modified by the AI: that would remove the safeguards and could redirect the code that receives the student's passphrase.")" ;;
     runconfig) deny_out "$(t "Git と Python の設定(.git/、~/.gitconfig、~/.config/git/、site-packages、sitecustomize・usercustomize、.pth)は AI が書かない。読み取りだけのコマンド(git log、python の起動)にも別のコードを実行させる設定になりうるため。" "Git and Python configuration (.git/, ~/.gitconfig, ~/.config/git/, site-packages, sitecustomize/usercustomize, .pth) is not written by the AI: it could make even read-only commands (git log, starting python) run other code.")" ;;
     claude) deny_out "$(t "Claude Code の設定と Plugin の置き場所(.claude/ と ~/.claude/)は AI が書き換えない。disableAllHooks や Plugin の無効化で、このプロジェクトの守り(フック)が全部止まるため。設定を変えるなら学生が自分で行う。" "Claude Code's settings and plugin folders (.claude/ and ~/.claude/) are not modified by the AI: disableAllHooks or disabling the plugin would stop every safeguard of this project. The student changes settings themselves.")" ;;
@@ -180,12 +177,12 @@ case "$TOOL" in
       claims) policy_gate ideas block ;;
       verification) policy_gate review ;;
       statement) : ;;
-      ci) ask_out "$(t "CI や Git フックの変更は検査を弱めうる(CI は基準ブランチの道具で検査し、PR での変更はエラーになる)。変更点を学生が確かめる。" "Changing CI or Git hooks may weaken the checks (CI checks with the base branch's tools and flags such changes in a PR). The student should review it.")" ;;
+      ci|pandoc) deny_class "$C" ;;
       proposals) policy_gate format block ;;
       research) policy_gate research ;;
       *)
         # outside the project: a shell/boot/bin target is already "startup" (deny); anything else asks, except a
-        # session temp dir (verification, new finding 3)
+        # session temp dir
         NAFP="$(norm_path "$AFP")"; NPROJ="$(norm_path "$PROJ")"
         case "$NAFP/" in
           "$NPROJ"/*) : ;;
@@ -235,7 +232,7 @@ case "$TOOL" in
         UC="$(path_class "$(rel_norm "$(phys_dir "$PROJ" 2>/dev/null || printf '%s' "$PROJ")" "$UPP")")"
         [ "$UC" = other ] && UC="$(path_class "$(rel_norm "$PROJ" "$UA")")"
         case "$UC" in
-          manuscript|ryukoku|tools|questions|searchlog|thinking|disclosure|annotations|ledger|raw|statehome|claude|runconfig|startup) deny_class "$UC" ;;
+          manuscript|ryukoku|tools|questions|searchlog|thinking|disclosure|annotations|ledger|raw|statehome|claude|runconfig|startup|ci|pandoc) deny_class "$UC" ;;
           bibliography) policy_gate verify block ;;
           claims) policy_gate ideas block ;;
           proposals) policy_gate format block ;;
@@ -301,7 +298,7 @@ case "$TOOL" in
       case "$PW" in
         manuscript) deny_class manuscript ;;
         unknown) deny_out "$(t "書き込み先の名前が、記録・設定・原稿のファイル名と同じなのに、場所を特定できない(cd の行き先が変数・解決できない glob など)。守られた場所への書き込みの可能性があるので止めた。パスをそのまま書くか、Write・Edit を使う。" "The write target has the name of a record, setting or manuscript file but its location cannot be determined (a cd to a variable or an unresolvable glob). It may reach a protected place, so it is blocked. Spell the path out, or use Write/Edit.")" ;;
-        ryukoku|tools|questions|searchlog|thinking|disclosure|statement|annotations|ledger|raw|statehome|claude|runconfig|startup) deny_class "$PW" ;;
+        ryukoku|tools|questions|searchlog|thinking|disclosure|statement|annotations|ledger|raw|statehome|claude|runconfig|startup|ci|pandoc) deny_class "$PW" ;;
       esac
     done
     for PW in $PWS; do
@@ -309,7 +306,6 @@ case "$TOOL" in
         claims) policy_gate ideas block ;;
         bibliography) policy_gate verify block ;;
         proposals) policy_gate format block ;;
-        ci) ask_out "$(t "CI や Git フックの変更は検査を弱めうる。変更点を学生が確かめる。" "Changing CI or Git hooks may weaken the checks. The student should review it.")" ;;
       esac
     done
     if printf '%s\n' "$SCAN" | LC_ALL=C grep -q '^unknown_target' && [ "$POLICY" = prohibited -o "$POLICY" = unreadable ]; then
@@ -347,7 +343,10 @@ case "$TOOL" in
     touches 'sources/(register|claims)\.csv|(register|claims)\.csv' && deny_class ledger
     touches '(^|[^a-z0-9_-])thinking/' 'thinking/' && deny_class thinking
     touches 'data/raw' && deny_class raw
-    if has '(127\.[0-9.]+|localhost|\[?::1\]?|\[?::ffff:127\.[0-9.]+\]?|0\.0\.0\.0|0x7f[0-9a-f]*|2130706433|0177\.[0-7.]+|\[?0:0:0:0:0:0:0:1\]?)(:[0-9]+)?/api/|(^|[^a-z0-9])(nc|ncat|netcat|telnet)[[:space:]].*(127\.|localhost|::1)'; then
+    # the notebook's local API: any host that reaches this computer (execgate resolves 127.0.0.0/8 and ::1 in every
+    # spelling, 0.0.0.0, localhost names and hosts-file names), and the string patterns below as the early warning
+    if printf '%s\n' "$SCAN" | LC_ALL=C grep -q '^loopback'; then HAS_LB=1; else HAS_LB=0; fi
+    if [ "$HAS_LB" = 1 ] || has '(127\.[0-9.]+|localhost|\[?::1\]?|\[?::ffff:127\.[0-9.]+\]?|0\.0\.0\.0|0x7f[0-9a-f]*|2130706433|0177\.[0-7.]+|\[?0:0:0:0:0:0:0:1\]?)(:[0-9]+)?/api/|(^|[^a-z0-9])(nc|ncat|netcat|telnet)[[:space:]].*(127\.|localhost|::1)'; then
       deny_out "$(t "証拠ノートのローカル API は人間がブラウザで使うもの。AI は 'python3 tools/rk/rk.py annot list|reply|flag' を使う(解決や VERIFIED は付けられない)。" "The notebook's local API is for the person in the browser. The AI uses 'python3 tools/rk/rk.py annot list|reply|flag' (it cannot resolve or verify).")"
     fi
     if has '(^|[;&|[:space:]])git([[:space:]]+-[^[:space:]]+)*[[:space:]]+(add|stage)([[:space:]]|$)' && has '\.ryukoku/cache|(^|[[:space:]/])\.cache/|api_cache|api-responses'; then

@@ -29,6 +29,8 @@ The scan returns findings (kind, detail):
   ("notebook_ok", path) / ("notebook_bad", path) / ("human", path)  the evidence notebook / a human-only command
   ("protected_write", "class<TAB>path")  a redirect or a write command reaches a path of that class (paths.classify,
                          after quotes, backslashes, globs and cd were resolved as bash would)
+  ("loopback", host)      the command names a host that reaches this computer (the evidence notebook's API lives
+                         there): 127.0.0.0/8 and ::1 in any spelling, 0.0.0.0, localhost names, hosts-file names
   ("unknown_target", text) a write whose target cannot be determined (a variable, an unresolvable glob, a relative
                          path after a cd the scanner could not follow)
 Paths are classified after lexing, never on the raw command string: `man\\uscript/main.md` is manuscript/main.md, and
@@ -63,7 +65,7 @@ READ_ONLY = {
     "pwd": (), "diff": (), "cut": (), "tr": (), "nl": (), "paste": (), "comm": (), "join": (), "column": (),
     "sha256sum": (), "sha1sum": (), "md5sum": (), "basename": (), "dirname": (), "realpath": (), "readlink": (),
     "du": (), "df": (), "tree": ("-o",), "jq": (), "od": (), "echo": (), "printf": (), "true": (), "false": (),
-    "test": (), "[": (), "cd": (), "mkdir": (), "which": (), "type": (), "printenv": (), "date": ("-s", "--set"),
+    "test": (), "[": (), "cd": (), "pushd": (), "popd": (), "dirs": (), "mkdir": (), "which": (), "type": (), "printenv": (), "date": ("-s", "--set"),
     "sort": ("--compress-program", "-o", "--output"), "uniq": (), "rg": ("--pre", "--pre-glob"), "file": ("-C", "-m"),
     "find": ("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"),
     "env": (), "command": (), "git": (), "sed": ("-i", "--in-place", "-e", "--expression", "-f", "--file", "-s"),
@@ -333,6 +335,8 @@ class Scan(object):
         self.proj = os.path.realpath(proj) if proj else ""
         self.found = []
         self.cwd_unknown = False
+        self.dirstack = []
+        self.cdpath = bool(os.environ.get("CDPATH"))
         self._tools_ok = None
         self.ai = ai_files()
         self.ai_shas = {v.get("sha") for v in self.ai.values() if isinstance(v, dict) and v.get("sha")}
@@ -419,6 +423,8 @@ class Scan(object):
                         self.add("ai_file", real)
 
     def command(self, cmd):
+        if re.search(r"CDPATH", cmd or ""):
+            self.cdpath = True
         try:
             cmds = split_commands(lex(cmd))
         except Unparsed as e:
@@ -488,22 +494,8 @@ class Scan(object):
                 return cwd
             self.add("ask", "%s %s(--version 以外の起動は外部のプログラムを動かしうる)" % (base, " ".join(args[:3])))
             return cwd
-        if base == "cd":
-            if not args or args[0] == "-":
-                if args:
-                    self.cwd_unknown = True
-                return cwd
-            text, dyn, glob = words[1]
-            if dyn:
-                self.cwd_unknown = True  # cd "$D": every later relative write target is unknown
-                return cwd
-            if glob:
-                hits = [h for h in _glob.glob(self._abs(text, cwd)) if os.path.isdir(h)]
-                if len(hits) != 1:
-                    self.cwd_unknown = True
-                    return cwd
-                return os.path.normpath(hits[0])
-            return os.path.normpath(os.path.join(cwd, os.path.expanduser(text.replace("\\", "/"))))
+        if base in ("cd", "pushd", "popd"):
+            return self.change_dir(base, words[1:], cwd)
         if base in PY_NAMES:
             return self.python(name, args, cwd)
         if base in SH_NAMES:
@@ -524,6 +516,49 @@ class Scan(object):
             return cwd
         self.add("ask", base)
         return cwd
+
+    def change_dir(self, base, words, cwd):
+        """cd / pushd / popd as bash runs them. The new directory is followed when it is certain; otherwise every
+        later relative write target is unknown (cwd_unknown): a variable or an unresolvable glob, `cd -`, popd, a
+        directory-stack argument (+N/-N), an unknown option, and any relative cd while CDPATH may be set (in the
+        environment, or assigned or exported by the command), because bash then may pick a directory elsewhere."""
+        args = list(words)
+        while args and args[0][0] in ("-L", "-P", "-e", "-@") and not args[0][1] and not args[0][2]:
+            args = args[1:]
+        if args and args[0][0] == "--":
+            args = args[1:]
+        if base == "popd":
+            if self.dirstack and not args:
+                return self.dirstack.pop()
+            self.cwd_unknown = True
+            return cwd
+        if not args:
+            if base == "pushd":
+                self.cwd_unknown = True  # swaps the top two entries
+            return cwd if base == "pushd" else os.path.expanduser("~")
+        text, dyn, glob = args[0]
+        if text == "-" or re.match(r"^[+-]\d*$", text) or text.startswith("-") or len(args) > 1:
+            self.cwd_unknown = True
+            return cwd
+        if dyn:
+            self.cwd_unknown = True  # cd "$D": every later relative write target is unknown
+            return cwd
+        t = text.replace("\\", "/")
+        if self.cdpath and not (t.startswith("/") or t.startswith("./") or t.startswith("../") or t in (".", "..")
+                                or t.startswith("~") or re.match(r"^[A-Za-z]:/", t)):
+            self.cwd_unknown = True
+            return cwd
+        if glob:
+            hits = [h for h in _glob.glob(self._abs(text, cwd)) if os.path.isdir(h)]
+            if len(hits) != 1:
+                self.cwd_unknown = True
+                return cwd
+            new = os.path.normpath(hits[0])
+        else:
+            new = os.path.normpath(os.path.join(cwd, os.path.expanduser(t)))
+        if base == "pushd":
+            self.dirstack.append(cwd)
+        return new
 
     def read_only_bad(self, base, args, words, cwd="."):
         if base == "sed":  # only `sed -n [N,Mp|Np] <file>` reads; e/w/s commands or a program run code
@@ -634,7 +669,8 @@ class Scan(object):
         k = 0
         while k < len(rest):
             a = rest[k]
-            if a == "--project" and k + 1 < len(rest):
+            # --project VALUE, and any abbreviation of it (rk.py also refuses abbreviations: allow_abbrev=False)
+            if len(a) > 2 and "--project".startswith(a) and k + 1 < len(rest):
                 k += 2
                 continue
             if a.startswith("-"):
@@ -693,9 +729,99 @@ class Scan(object):
         return os.path.realpath(target) == self.plugin_root
 
 
+# ------------------------------------------------------------------------------------------------ loopback hosts
+LOOPBACK_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback", "localhost6",
+                  "localhost6.localdomain6"}
+NET_CMDS = {"nc", "ncat", "netcat", "telnet", "socat", "curl", "wget", "http", "https", "xh", "aria2c", "lynx", "w3m"}
+
+
+def _hosts_file_loopback_names():
+    """Names that the hosts file maps to a loopback address (read locally; no DNS query is made)."""
+    out = set()
+    for p in ("/etc/hosts", os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "drivers", "etc", "hosts")):
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                for ln in f:
+                    parts = ln.split("#", 1)[0].split()
+                    if len(parts) >= 2 and _numeric_loopback(parts[0]):
+                        out.update(x.lower().rstrip(".") for x in parts[1:])
+        except OSError:
+            pass
+    return out
+
+
+def _numeric_loopback(h):
+    """An address in any spelling the C library accepts (inet_aton: 127.1, 0x7f.1, 2130706433, 0177.0.0.1) or an IPv6
+    address (::1, ::ffff:7f00:1, 0:0:0:0:0:0:0:1) that is loopback or unspecified (0.0.0.0 and :: reach this host)."""
+    import ipaddress
+    import socket
+    h = h.strip("[]").split("%", 1)[0]
+    if not h:
+        return False
+    try:
+        a = ipaddress.ip_address(h)
+        if a.version == 6 and a.ipv4_mapped is not None:
+            a = a.ipv4_mapped
+        return a.is_loopback or a.is_unspecified
+    except ValueError:
+        pass
+    if re.fullmatch(r"(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\.(?:0[xX][0-9a-fA-F]+|[0-9]+)){0,3}", h):
+        try:
+            a = ipaddress.IPv4Address(socket.inet_aton(h))
+            return a.is_loopback or (a.is_unspecified and "." in h)
+        except (OSError, ValueError):
+            return False
+    return False
+
+
+def is_loopback(host, _names=None):
+    h = (host or "").strip().strip("[]").rstrip(".").lower()
+    if not h:
+        return False
+    if h in LOOPBACK_NAMES or h.endswith(".localhost"):
+        return True
+    if _numeric_loopback(h):
+        return True
+    names = _names if _names is not None else _hosts_file_loopback_names()
+    return h in names
+
+
+def loopback_targets(command):
+    """Hosts in COMMAND that reach this computer: the host of every URL (with or without a scheme, e.g.
+    'http://0x7f.1:8765/x' or '[::ffff:7f00:1]:8765/api'), every 'host:port' word, every address in curl's --resolve /
+    --connect-to values, and the arguments of nc/telnet/socat. Names are matched against a fixed list and the hosts
+    file only: a DNS name that some resolver points at 127.0.0.1 is not detected (README)."""
+    text = (command or "").replace("\\", "")
+    words = [w for w in re.split(r"[\s'\"`;|&()<>{}]+", text) if w]
+    names = None
+    out = []
+    prev = ""
+    for w in words:
+        cands = []
+        m = re.match(r"^(?:[A-Za-z][A-Za-z0-9+.-]*://)?(?:[^@/\s]*@)?(\[[^\]]+\]|[^/\s:\[\]]+)(?::(\d{1,5}))?(/|$)", w)
+        netish = "://" in w or re.search(r":\d{1,5}(?:/|$)", w) or os.path.basename(prev) in ("nc", "ncat", "netcat", "telnet")
+        if m and netish:
+            cands.append(m.group(1))
+        if re.match(r"^(?:tcp|tcp4|tcp6|udp|udp4|udp6|tcp-connect|tcp4-connect|tcp6-connect|udp-connect|unix-connect|open|connect):", w, re.I):
+            cands += re.split(r"[:,]", w.split(":", 1)[1])
+        if prev in ("--resolve", "--connect-to") or w.startswith(("--resolve=", "--connect-to=")):
+            cands += [x for x in re.split(r"[:,=]", w) if x]
+        if os.path.basename(prev) in ("nc", "ncat", "netcat", "telnet") and not w.startswith("-"):
+            cands.append(w)
+        for c in cands:
+            if names is None and not (c.lower() in LOOPBACK_NAMES or _numeric_loopback(c)):
+                names = _hosts_file_loopback_names()
+            if is_loopback(c, names if names is not None else set()):
+                out.append(c)
+        prev = w
+    return out
+
+
 def scan(command, cwd, plugin_root, proj, session_start=0):
     s = Scan(cwd, plugin_root, proj)
     s.command(command or "")
+    for h in loopback_targets(command or ""):
+        s.add("loopback", h)
     return s.found
 
 

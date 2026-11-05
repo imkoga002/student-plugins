@@ -1,10 +1,13 @@
 """Provenance of the manuscript, paragraph by paragraph: .ryukoku/provenance.jsonl (append-only, committed).
 
 Each line is one paragraph (or heading) that someone wrote, changed or deleted:
-  {"type": "paragraph", "file", "kind", "actor": "ai"|"student", "estimated", "lines": [start, end], "sha",
+  {"type": "paragraph", "file", "kind", "actor": "ai"|"student"|"uncertain", "estimated", "lines": [start, end], "sha",
    "from_sha", "section", "chars", "block", "materials": {"claims", "sources", "data", "purpose"}, "tool",
    "policy", "date", "ts", "prev"}
-  kind: ai_wrote / ai_edited / ai_deleted / student_wrote / student_edited / student_deleted
+  kind: ai_wrote / ai_edited / ai_deleted / student_wrote / student_edited / student_deleted, and
+  uncertain_wrote / uncertain_edited / uncertain_deleted with actor "uncertain" and "uncertain": true for a change
+  found after an AI tool call that never finished (no PostToolUse: declined, failed, or older than msguard's limit);
+  such a paragraph counts with the AI's.
 Every line carries "prev" = SHA-256 of the previous line ("GENESIS" for the first), like the AI-use log, so a
 deleted or rewritten line breaks the chain; `rk check` verifies it, locally against the head remembered outside
 the project and in CI by requiring the file to extend the base branch's version.
@@ -25,15 +28,13 @@ import re
 import time
 
 from . import paragraphs as P
-from .common import (FileLock, load_config, note_written, manuscript_files, read_text, rel, sha256_bytes, state_dir, today,
+from .common import (FileLock, course_policy, load_config, note_written, manuscript_files, read_text, rel, sha256_bytes, state_dir, today,
                      now_iso, tr)
 
 PROV_REL = os.path.join(".ryukoku", "provenance.jsonl")
 GENESIS = "GENESIS"
 MATERIALS_TTL = 2 * 3600
 AI_KINDS = ("ai_wrote", "ai_edited")
-CITE = re.compile(r"(?<![\w.])-?@([A-Za-z0-9_][A-Za-z0-9_:.#$%&+?<>~/-]*)")
-NONCITE = ("fig:", "tbl:", "sec:", "eq:", "lst:")
 
 
 def path(proj):
@@ -195,8 +196,9 @@ def peek_materials(proj, relp):
 
 
 def citekeys(text):
-    t = re.sub(r"`[^`]*`", "", text or "")
-    return sorted({k.rstrip(".:,;") for k in CITE.findall(t) if not k.startswith(NONCITE)})
+    """Citation keys in TEXT, by pandoc's key rule (rklib/citations.py; Unicode keys such as 山田2020 included)."""
+    from . import citations
+    return sorted(citations.body_keys(text))
 
 
 def _source_ids(proj, keys):
@@ -212,7 +214,12 @@ def _source_ids(proj, keys):
 # ------------------------------------------------------------------------------------------------ recording
 def record(proj, relp, old_text, new_text, actor, tool="", materials=None, estimated=False, uncertain=False):
     """Record every block that differs between OLD_TEXT and NEW_TEXT of RELP, then remember NEW_TEXT."""
-    pol = load_config(proj).get("ai_policy") or "unknown"
+    try:
+        pol = course_policy(proj)  # the hooks' decision ("unreadable" when the settings cannot be trusted)
+    except (OSError, UnicodeDecodeError):
+        pol = "unreadable"
+    if uncertain:
+        actor = "uncertain"  # changed while an AI tool call was open but never finished: not attributed to the student
     objs = []
     seen = set()
     if estimated:
@@ -319,7 +326,7 @@ def attribution(proj, texts=None):
 
     def ai_in_chain(f, i, depth=0):
         e = ents[i]
-        if e.get("actor") == "ai" and e.get("kind") in AI_KINDS:
+        if (e.get("actor") == "ai" and e.get("kind") in AI_KINDS) or e.get("uncertain"):
             return True
         if depth > 60 or not e.get("from_sha"):
             return False

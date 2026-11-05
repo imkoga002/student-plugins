@@ -23,7 +23,7 @@ fi
 is_active "$PROJ" || exit 0
 LANG_M="$(cfg_get manuscript_lang)"; [ -n "$LANG_M" ] || LANG_M=ja
 FB_LANG="$(cfg_get feedback_lang)"; [ -n "$FB_LANG" ] || FB_LANG="$LANG_M"
-POLICY="$(cfg_get ai_policy)"; [ -n "$POLICY" ] || POLICY=unknown
+RK_HOOKCORE="$HC"; CFG_BAD=""; POLICY=unreadable; cfg_policy
 COURSE="$(cfg_get course_name)"; USES="$(cfg_get ai_allowed_uses)"; DISC="$(cfg_get disclosure_format)"
 DEADLINE="$(cfg_get deadline)"; GCHK="$(cfg_get guideline_checked)"
 MODEL="$(printf '%s' "$INPUT" | json_string_field model)"
@@ -77,6 +77,8 @@ case "$POLICY" in
 $(t "!! この科目は AI 利用禁止と記録されている。原稿の執筆・修正、主張カードの作成、表記の提案はフックが止める。調査・検証(修正案の文は出さない)・形式の確認はできる。記録が正しいかをシラバスや教員の指示で確かめるよう促す(ガイドラインⅢ-3)。" "!! This course is recorded as AI-prohibited. The hooks block writing or revising the manuscript, drafting claim cards and notation proposals; research, verification (without rewritten text) and format checks remain. Suggest that the student confirm the record with the syllabus or instructor (guideline III-3).")" ;;
   limited) C="$C
 $(t "!! この科目の AI 利用は限定。原稿に書く前は毎回確認が出る。許可された用途($USES)の外のツール操作にも確認が出る。" "!! AI use is limited in this course. Every manuscript write asks first, and so do tools outside the allowed uses ($USES).")" ;;
+  unreadable) C="$C
+$(t "!! このプロジェクトの設定(.ryukoku/config.yml)を読めない($CFG_BAD)。直るまで原稿への書き込みはフックが止める。学生に ./rk check で原因を見て ./rk setup で直してもらう(UTF-8 で保存、ai_policy は一行だけ)。" "!! This project's settings (.ryukoku/config.yml) cannot be read ($CFG_BAD). Until fixed, the hooks deny manuscript writes. Ask the student to look at ./rk check and fix it with ./rk setup (save as UTF-8, a single ai_policy line).")" ;;
   *) [ "$POLICY" = unknown ] && C="$C
 $(t "!! 科目の AI 利用条件が未確認。原稿に書く前は毎回確認が出る。ガイドラインⅢ-3に従い、シラバスの確認か担当教員への相談を学生に一度促す。確かめたら学生が自分の端末で ./rk setup。" "!! The course AI policy is unknown. Every manuscript write asks first. Following guideline III-3, suggest once that the student checks the syllabus or asks the instructor, then runs ./rk setup in their terminal.")" ;;
 esac

@@ -195,6 +195,10 @@ class Project(unittest.TestCase):
         with open(self.E.path(MS), "a", encoding="utf-8") as f:
             f.write("\n現象 X は 45% の事例で見られた。\n\n現象 X は 12.5 倍になった [@w2023]。\n\n件数は 30 件だった[^1]。\n\n[^1]: data/processed/x.csv の集計\n")
         r = self.E.rk("check")
+        self.assertIn("30 件", r.stdout)   # a data reference counts only when the file exists
+        os.makedirs(self.E.path("data", "processed"), exist_ok=True)
+        open(self.E.path("data", "processed", "x.csv"), "w").write("n\n30\n")
+        r = self.E.rk("check")
         self.assertIn("45%", r.stdout)
         self.assertNotIn("12.5", r.stdout)
         self.assertNotIn("30 件", r.stdout)

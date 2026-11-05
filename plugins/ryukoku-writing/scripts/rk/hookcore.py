@@ -3,8 +3,8 @@
     python3 -I -B <plugin>/scripts/rk/hookcore.py <command> <project> [args...]
 and treat any failure as "nothing to report" (a broken helper must never break the session).
 
-  pre PROJ TOOL_USE_ID [run|ask]        msguard window before a tool call that may write ("ask": pending until
-                                        PostToolUse shows the student allowed it)
+  pre PROJ TOOL_USE_ID [run|ask]        msguard window before a tool call that may write (open until its
+                                        PostToolUse, or until the turn ends)
   preall TOOL_USE_ID [run|ask]          the same for every registered project (no project in sight)
   post PROJ TOOL TOOL_USE_ID SUMMARY [COMMAND] [FILE_PATH]
                                         msguard comparison after it; prints {"entries": [...], ...}; records the
@@ -18,6 +18,10 @@ and treat any failure as "nothing to report" (a broken helper must never break t
   session PROJ PLUGIN_ROOT              SessionStart status (pending work, tools integrity) as JSON; records the
                                         plugin location for the ./rk launcher (outside the project)
   nfkc                                  NFKC-normalise stdin (used before the personal-data scan)
+  cfgcheck PROJ                         "ok<TAB>policy" or "bad<TAB>reason": the one decision on .ryukoku/config.yml
+                                        (common.config_problems / course_policy)
+  turnend PROJ                          the turn ended: close windows that got no PostToolUse (msguard.turn_end)
+  stop PROJ                             turnend, then the Stop summary as JSON
 """
 import json
 import os
@@ -116,7 +120,17 @@ def main(argv):
     elif cmd == "pwcheck":
         print("match" if pwcheck(proj, sys.stdin.read()) else "")
     elif cmd == "stop":
+        try:
+            msguard.turn_end(proj)
+        except OSError:
+            pass
         print(json.dumps(stop(proj), ensure_ascii=False))
+    elif cmd == "cfgcheck":
+        from rklib.common import config_problems, course_policy
+        probs = config_problems(proj)
+        print("ok\t%s" % course_policy(proj) if not probs else "bad\t%s" % probs[0].replace("\t", " ").replace("\n", " ")[:200])
+    elif cmd == "turnend":
+        msguard.turn_end(proj)
     elif cmd == "session":
         print(json.dumps(session(proj, argv[2] if len(argv) > 2 else "", argv[3] if len(argv) > 3 else ""), ensure_ascii=False))
     return 0

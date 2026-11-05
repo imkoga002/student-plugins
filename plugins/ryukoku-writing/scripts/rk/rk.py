@@ -622,8 +622,8 @@ def cmd_bundle(proj, a):
 
 def cmd_notebook(proj, a):
     if is_inside(HERE, proj):
-        raise RkError(tr(feedback_lang(proj), "証拠ノートの画面は、インストールされた Plugin から起動する(プロジェクトの中の tools/ からは起動しない)。./rk notebook か、Claude に「証拠ノートを開いて」と頼む。",
-                         "Start the notebook from the installed plugin, not from tools/. Use ./rk notebook or ask Claude to open it."))
+        raise RkError(tr(feedback_lang(proj), "証拠ノートの画面は、インストールされた Plugin から起動する(プロジェクトの中の tools/ からは起動しない)。自分の端末で ./rk notebook を実行する(AI には起動させない)。",
+                         "Start the notebook from the installed plugin, not from tools/: run ./rk notebook in your own terminal (the AI does not start it)."))
     from notebook.server import serve
     return serve(proj, a.port, a.open, a.once)
 
@@ -645,7 +645,8 @@ def cmd_update_tools(proj, a):
 
 # ===================================================================== parser
 def build_parser():
-    p = argparse.ArgumentParser(prog="rk", description="ryukoku-writing project tool (./rk help)")
+    # allow_abbrev=False: "--proj" is not "--project", so the hooks see the subcommand where argparse does
+    p = argparse.ArgumentParser(prog="rk", description="ryukoku-writing project tool (./rk help)", allow_abbrev=False)
     p.add_argument("--project", default=None)
     p.add_argument("--version", action="version", version="ryukoku-writing rk " + VERSION)
     sub = p.add_subparsers(dest="cmd")

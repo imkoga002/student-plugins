@@ -53,6 +53,42 @@ cfg_get() {
 }
 cfg_count() { LC_ALL=C grep -c "^$1[[:space:]]*:" "$PROJ/.ryukoku/config.yml" 2>/dev/null || echo 0; }
 
+# cfg_check_bash -> "ok<TAB>policy" or "bad<TAB>reason": the rule of rklib/common.py POLICY_LINE / config_problems for a
+# computer without Python 3 (UTF-8 only checked when iconv exists)
+cfg_check_bash() {
+  local f="$PROJ/.ryukoku/config.yml" n line v cr tab
+  tab="$(printf '\t')"; cr="$(printf '\r')"
+  [ -f "$f" ] || { printf 'bad\tmissing'; return 0; }
+  [ -r "$f" ] || { printf 'bad\tunreadable'; return 0; }
+  if command -v iconv >/dev/null 2>&1; then
+    iconv -f UTF-8 -t UTF-8 "$f" >/dev/null 2>&1 || { printf 'bad\tnot UTF-8'; return 0; }
+  fi
+  if [ -n "$(LC_ALL=C grep -E '^[A-Za-z_][A-Za-z0-9_]*[ '"$tab"']*:' "$f" | LC_ALL=C sed -E 's/[ '"$tab"']*:.*//' | LC_ALL=C grep -v '^ai_policy$' | LC_ALL=C sort | LC_ALL=C uniq -d)" ]; then
+    printf 'bad\tduplicate key'; return 0
+  fi
+  n="$(LC_ALL=C grep -c "^[ $tab]*ai_policy[ $tab]*:" "$f" 2>/dev/null)"
+  [ "$n" = 1 ] || { printf 'bad\tai_policy x%s' "${n:-0}"; return 0; }
+  line="$(LC_ALL=C grep "^[ $tab]*ai_policy[ $tab]*:" "$f" | LC_ALL=C sed "s/$cr\$//")"
+  v="$(printf '%s\n' "$line" | LC_ALL=C sed -n -E \
+        -e "s/^ai_policy[ $tab]*:[ $tab]*(allowed|limited|prohibited|unknown)[ $tab]*(#.*)?\$/\1/p" \
+        -e "s/^ai_policy[ $tab]*:[ $tab]*\"(allowed|limited|prohibited|unknown)\"[ $tab]*(#.*)?\$/\1/p" \
+        -e "s/^ai_policy[ $tab]*:[ $tab]*'(allowed|limited|prohibited|unknown)'[ $tab]*(#.*)?\$/\1/p")"
+  [ -n "$v" ] || { printf 'bad\tai_policy line'; return 0; }
+  printf 'ok\t%s' "$v"
+}
+
+# cfg_policy -> sets POLICY (allowed|limited|prohibited|unknown, or "unreadable") and CFG_BAD (the reason, or empty).
+# One decision with the Python side: hookcore.py cfgcheck when Python 3 exists, cfg_check_bash otherwise.
+cfg_policy() {
+  local c=""
+  if [ -n "${RK_HOOKCORE:-}" ] && have_python; then c="$(pyrun -I -B "$RK_HOOKCORE" cfgcheck "$PROJ" 2>/dev/null || true)"; fi
+  [ -n "$c" ] || c="$(cfg_check_bash)"
+  case "$c" in
+    ok"	"allowed|ok"	"limited|ok"	"prohibited|ok"	"unknown) POLICY="${c#ok	}"; CFG_BAD="" ;;
+    *) CFG_BAD="${c#bad	}"; [ -n "$CFG_BAD" ] || CFG_BAD=unreadable; POLICY=unreadable ;;
+  esac
+}
+
 # project_dir CWD_FROM_JSON -> CLAUDE_PROJECT_DIR, else cwd from the hook JSON, else $PWD
 project_dir() {
   local d="${CLAUDE_PROJECT_DIR:-}"
@@ -186,7 +222,8 @@ path_class() {
     */sources/register.csv|*/sources/claims.csv) echo ledger; return ;;
     */sources/references.json) echo bibliography; return ;;
     */data/raw/*) echo raw; return ;;
-    */.github/*|*/.githooks/*|*/.git/hooks/*) echo ci; return ;;
+    */.github/*|*/.githooks/*|*/.git/hooks/*|*/.github|*/.githooks) echo ci; return ;;
+    */pandoc/*|*/pandoc) echo pandoc; return ;;
     */proposals/*) echo proposals; return ;;
     */claims/*) echo claims; return ;;
     */review/verification/*) echo verification; return ;;

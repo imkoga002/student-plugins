@@ -1,7 +1,7 @@
-"""Regressions from the third round of independent adversarial verification: allow-listed commands (git, the
-plugin's export) that read configuration the AI could write and so run other programs, writes outside the project
-that take over the student's terminal, the CI root with several keys, line-initial Markdown marks, and common
-read-only commands. Each finding's reproduction became a test here."""
+"""Configuration that makes allowed commands run other programs: allow-listed commands (git, the plugin's export)
+that read configuration the AI could write, writes outside the project that take over the student's terminal, the CI
+root with several keys, line-initial Markdown marks, and common read-only commands. Each test reproduces a way around
+a safeguard that an independent adversarial review found."""
 import json
 import os
 import shutil

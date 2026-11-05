@@ -208,7 +208,7 @@ class App(object):
             pass
         if kind == "section":
             att = provenance.attribution(self.proj).get(sid, [])
-            out["ai_paragraphs"] = [[r["start"], r["end"], r["origin"]] for r in att if r["origin"] in ("ai_wrote", "ai_edited", "student_after_ai")]
+            out["ai_paragraphs"] = [[r["start"], r["end"], r["origin"]] for r in att if r["origin"] in ("ai_wrote", "ai_edited", "uncertain", "student_after_ai")]
         return out
 
     def doc(self, relp):
@@ -465,7 +465,12 @@ def serve(proj, port=0, open_browser=False, once=False):
     if once:
         return 0
     keyed = url + "#k=" + srv.app.session
-    _sign.tty_print(("開く URL(鍵つき。チャットに貼らない): %s" if lang != "en" else "Open this URL (it carries the key; never paste it into the chat): %s") % keyed)
+    try:
+        _sign.tty_print(("開く URL(鍵つき。チャットに貼らない): %s" if lang != "en" else "Open this URL (it carries the key; never paste it into the chat): %s") % keyed)
+    except _sign.SignError as e:  # no console to show the key on: do not start (the key never goes to stdout)
+        print(str(e), file=sys.stderr)
+        srv.server_close()
+        return 3
     if open_browser:
         webbrowser.open(keyed)
     try:

@@ -15,6 +15,8 @@ description: "原稿を提出形式(Word の docx、PDF、LaTeX)に書き出す�
   - 設定は `pandoc/defaults-<lang>-docx.yaml`(.ryukoku/config.yml の manuscript_lang で切り替わる)。日本語は `+east_asian_line_breaks`(ないと段落内の改行が空白になる)
   - 見た目は `pandoc/reference.docx`(初期化時に pandoc の既定から作った)。学生が Word でスタイル(フォント・余白・A4・行数)だけを直す。数値は学部の要項に従う
   - 引用は citeproc + `sources/references.json`(CSL-JSON)。書式は学部が指定する CSL を `pandoc/` に置く(日本語は公式 CSL リポジトリに SIST02 がある)
+  - `pandoc/` の中(設定・CSL・テンプレート)は AI が書かない(フックが止める)。文献一覧の出し方や書き出す内容を変えられるため。変えるのは学生で、自分で置いたら `./rk sign guarded tools --decision confirmed` で確かめる(確かめるまで書き出しは止まる)。AI は、何をどこに置くかを学生に伝える
+  - 文献一覧は `sources/references.json` だけから作る。設定や front matter で別のファイルや `references:` を指すと書き出さない。出る項目の DOI・ISBN・題名・年・著者が台帳(`sources/register.csv`)と違うときも書き出さない。違いを言われたら、項目を台帳に合わせる(台帳の誤りなら `rk.py refcheck check` で確かめ直す)
 - PDF: `python3 tools/rk/rk.py export pdf`(LuaLaTeX + LuaTeX-ja、`ltjsarticle` か `jlreq`。TeX Live の collection-langjapanese。英語は標準の article)。PDF・LaTeX の設定では `lang` を設定しない(pandoc は lang があると babel を読み込む: pandoc の LaTeX テンプレート common.latex、https://github.com/jgm/pandoc/blob/main/data/templates/common.latex 。babel と jlreq・LuaTeX-ja の組み合わせは未確認のため)
 - LaTeX: `python3 tools/rk/rk.py export latex`(提出先が LaTeX を求めるとき)
 - 書式の見本(数式・論証図・因果図・研究の流れ・年表・概念図・表・脚注・相互参照)の確認: `python3 tools/rk/rk.py export docx --file examples/format-examples.md`

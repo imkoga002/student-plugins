@@ -16,6 +16,7 @@ are the plugin author's choice and have not been evaluated on real manuscripts.
 """
 import os
 import re
+import unicodedata
 
 from . import claimcards, ledger, paragraphs as P, provenance
 from .common import RkError, manuscript_files, read_text, rel, safe_rel, today, tr
@@ -41,10 +42,23 @@ FACTUAL = ("によれば", "調査", "統計", "データ", "研究", "報告", 
            "according to", "survey", "data", "study", "studies", "report", "rate", "percent", "share")
 OPINION = ("と考える", "と考えられる", "と思われる", "だろう", "ではないか", "かもしれない", "と主張する", "と論じる", "本稿は",
            "筆者は", "と言える", "といえる", "I argue", "we argue", "this paper", "this essay", "I suggest", "may ", "might")
-# A figure: a number with a unit of quantity, or a decimal. Not figures: years (2020年, 1990年代), section, chapter,
-# article and version numbers (3.2 節, 第 2 章, v1.2, 2.0.0), page ranges, numbers inside URLs and code.
-NUM = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?\s*(?:%|％|パーセント|割|倍|人|名|件|円|万|億|兆|社|校|時間|点|ドル|percent|million|billion)"
-                 r"|(?<![\w.第§])(?<!version )(?<!ver\. )(?<![vV])\d+\.\d+(?![\w.]|\s*(?:節|章|項|条|版|section|chapter))")
+# A figure: a number with a unit of quantity, a decimal, or a large integer (a thousands separator or five digits and
+# more), written in Arabic digits (full-width ones are read as ASCII first) or in kanji numerals (三割, 百万人). A number
+# right after kana or kanji counts (only an ASCII letter, digit or "." before it says it is part of a name). Not
+# figures: years (2020年, 1990年代, a bare 2030), section, chapter, article, figure, table and equation numbers (3.2 節,
+# 第 2 章, 図 1.2, 表 3, 式 (2.3), Figure 2, Table 3.1), versions (v1.2, 2.0.0, Python 3.13), page ranges, numbers in
+# URLs, code and math. It is a heuristic: a figure in words ("twelve per cent") or with a unit not listed is missed.
+UNITS = (r"%|パーセント|ポイント|percentage points?|per ?cent|percent|か国|カ国|ヵ国|ヶ国|ケ国|箇国|割|倍|位|人|名|件|円|"
+         r"万|億|兆|社|校|時間|点|ドル|歳|才|回|世帯|times|million|billion|thousand|trillion|points?")
+NUM = re.compile(r"(?<![0-9A-Za-z.第])\d[\d,]*(?:\.\d+)?\s*(?:" + UNITS + r")"
+                 r"|(?<![0-9A-Za-z.第§])\d+\.\d+(?![\w.]|\s*(?:節|章|項|条|版|section|chapter))"
+                 r"|(?<![0-9A-Za-z.])\d{1,3}(?:,\d{3})+(?![\d.,])|(?<![0-9A-Za-z.])\d{5,}(?![\d.,])"
+                 r"|[〇一二三四五六七八九十百千]{2,}(?:万|億|兆)?\s*(?:" + UNITS + r")"
+                 r"|[〇一二三四五六七八九十百千](?:割|倍|パーセント|万|億|兆)")
+# labels and names that a number follows without being a figure (removed before matching)
+NOT_FIGURE = re.compile(r"(?:図|表|式|写真|資料|付録|Figure|Fig\.|Table|Tab\.|Eq\.|Equation|Appendix)\s*[(（]?\s*[0-9]+(?:[.\-‐][0-9]+)*\s*[)）]?"
+                        r"|\b[A-Z][A-Za-z+#]*\s+v?[0-9]+(?:\.[0-9]+)+\b(?!\s*(?:" + UNITS + r"))"
+                        r"|\b[vV](?:er\.?|ersion)?\s?[0-9]+(?:\.[0-9]+)+|第\s*[0-9]+")
 DATAREF = re.compile(r"(?<![\w/])data/(?:raw|processed)/[\w./-]+")
 FOOTREF = re.compile(r"\[\^([^\]]+)\](?!:)")
 
@@ -106,11 +120,30 @@ def numeric_values(proj):
     return vals
 
 
-def has_source(par_text, notes):
+def has_source(par_text, notes, proj=None):
+    """A citation, or a reference to a data file under data/raw|processed/ (in the paragraph or its footnotes). With
+    PROJ, a data reference counts only when that file exists."""
     t = par_text
     for lab in FOOTREF.findall(par_text):
         t += "\n" + notes.get(lab, "")
-    return bool(provenance.citekeys(t)) or bool(DATAREF.search(t))
+    if provenance.citekeys(t):
+        return True
+    for m in DATAREF.finditer(t):
+        if proj is None or os.path.isfile(os.path.join(proj, m.group(0).rstrip(".,;:)）」』"))):
+            return True
+    return False
+
+
+def figures(text):
+    """The figures (NUM above) in TEXT, after full-width characters are read as ASCII and code, math, URLs, citations
+    and figure/table/equation/version labels are removed."""
+    body = unicodedata.normalize("NFKC", text or "")
+    body = re.sub(r"\$[^$]*\$", "", re.sub(r"`[^`]*`", "", body))
+    body = re.sub(r"https?://\S+|\]\([^)]*\)", " ", body)
+    body = re.sub(r"\[@[^\]]*\]|@\{[^}]*\}|@[\w:.#$%&+?<>~/-]+", " ", body)
+    body = DATAREF.sub(" ", body)
+    body = NOT_FIGURE.sub(" ", body)
+    return [m.group(0).strip() for m in NUM.finditer(body)]
 
 
 def numbers_without_source(proj, text, relp=""):
@@ -122,16 +155,14 @@ def numbers_without_source(proj, text, relp=""):
     for b in P.paragraphs(text):
         if P.FOOTDEF.match(b["text"].split("\n")[0]) or b["text"].lstrip().startswith("|") or b["text"].lstrip().startswith("$$"):
             continue
-        body = re.sub(r"\$[^$]*\$", "", re.sub(r"`[^`]*`", "", b["text"]))
-        body = re.sub(r"https?://\S+|\]\([^)]*\)", " ", body)
-        body = re.sub(r"\[@[^\]]*\]|@[A-Za-z0-9_:.-]+", "", body)
-        toks = [m.group(0).strip() for m in NUM.finditer(body)]
-        if not toks or has_source(b["text"], notes):
+        toks = figures(b["text"])
+        if not toks or has_source(b["text"], notes, proj):
             continue
+        lines = unicodedata.normalize("NFKC", b["text"]).split("\n")
         for tok in toks:
             if tok in known or re.sub(r"[^\d.,]", "", tok) in known:
                 continue
-            ln = b["start"] + next((i for i, x in enumerate(b["text"].split("\n")) if tok.split()[0] in x), 0)
+            ln = b["start"] + next((i for i, x in enumerate(lines) if tok.split()[0] in x), 0)
             out.append((ln, tok))
     return out
 
@@ -145,7 +176,7 @@ def assertive_uncited(text, notes):
     for s in sentences(text):
         if _has(s, OPINION) or _has(s, HEDGE["ja"] + HEDGE["en"]):
             continue
-        if NUM.search(s) or _has(s, FACTUAL):
+        if figures(s) or _has(s, FACTUAL):
             out.append(s)
     return out
 

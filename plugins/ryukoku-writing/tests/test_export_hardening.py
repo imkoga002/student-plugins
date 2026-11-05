@@ -1,6 +1,7 @@
-"""Regressions from the fourth and fifth rounds of independent adversarial verification: pandoc custom readers and
-writers named by `from`/`to`, values that go into the LaTeX template, and external programs (pandoc, the LaTeX
-engine, mmdc) running with the project as their working directory, where AI-written configuration is found; and flow-style YAML in the defaults."""
+"""The export: pandoc custom readers and writers named by `from`/`to`, values that go into the LaTeX template, external
+programs (pandoc, the LaTeX engine, mmdc) running with the project as their working directory, where AI-written
+configuration is found, and flow-style YAML in the defaults. Each test reproduces a way around a safeguard that an
+independent adversarial review found."""
 import os
 import stat
 import sys

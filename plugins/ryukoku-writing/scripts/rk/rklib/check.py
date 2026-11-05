@@ -253,8 +253,10 @@ def check_searchlog(proj, rep):
 
 
 def check_citations(proj, idx, rep, stage):
-    """Every bibliography entry the manuscript would render ([@key], @{key}, nocite, nocite '@*') must be in the
-    ledger at IDENTITY_CONFIRMED (an error at submission, a warning while drafting), and at submission each must be
+    """Every bibliography entry the manuscript would render ([@key], @{key}, nocite, nocite '@*'; keys by pandoc's rule,
+    Unicode letters included, and at submission also as pandoc itself reads them) must be in the ledger at
+    IDENTITY_CONFIRMED (an error at submission, a warning while drafting), its entry in sources/references.json must
+    say what the ledger says (identifier, title, year, authors: always an error), and at submission each must be
     signed VERIFIED by the student. Author-year mentions in plain prose cannot be checked (README)."""
     from . import citations
     texts = []
@@ -263,8 +265,14 @@ def check_citations(proj, idx, rep, stage):
         texts.append(text)
         if criticmarkup.has_markup(text):
             (rep.err if stage == "submit" else rep.warn)(rep.t("CriticMarkup の記号が原稿に残っている: %s", "CriticMarkup marks remain in the manuscript: %s") % rel(proj, p))
-    keys, star = citations.rendered(proj, texts)
+    keys, star = citations.rendered(proj, texts, use_pandoc=(stage == "submit"))
     bad = (rep.err if stage == "submit" else rep.warn)
+    for p, text in zip(manuscript_files(proj), texts):
+        ov = citations.front_matter_overrides(text)
+        if ov:
+            bad(rep.t("%s の front matter に %s がある。文献一覧は sources/references.json だけから作る(書き出しはこの指定を受け付けない)",
+                      "%s sets %s in its front matter. The bibliography comes from sources/references.json only (export refuses this)")
+                % (rel(proj, p), ", ".join(ov)))
     probs = citations.problems(proj, keys)
     unknown = [k for k, why in probs if why == "not_in_ledger"]
     if unknown:
@@ -273,6 +281,13 @@ def check_citations(proj, idx, rep, stage):
             % (rep.t("・nocite の @* を含む", ", nocite '@*' included") if star else "", ", ".join(unknown[:10])))
     for k, why in probs:
         if why == "not_in_ledger":
+            continue
+        if why.startswith("mismatch:"):
+            rep.err(rep.t("引用 %s の文献一覧の項目(sources/references.json)が台帳と違う(%s)。書き出される文献は、識別子で確かめた台帳の記録と同じでなければならない。"
+                          "references.json の項目を台帳に合わせる(台帳の誤りなら rk.py refcheck check で確かめ直す)",
+                          "The bibliography entry of %s (sources/references.json) differs from the ledger (%s). A printed entry must say what the "
+                          "ledger record, checked against the identifier, says. Fix the entry (or re-check the ledger with rk.py refcheck check)")
+                    % (k, why.split(":", 1)[1]))
             continue
         bad(rep.t("引用 %s の台帳の状態が %s(IDENTITY_CONFIRMED 未満)。rk.py refcheck check で識別子を確かめる(識別子が無ければ NCID・NDL ID などを台帳に足す)か、使わない",
                   "%s has ledger state %s (below IDENTITY_CONFIRMED). Check its identifier with rk.py refcheck check (add an NCID, NDL ID or the like if it has none), or do not cite it") % (k, why))

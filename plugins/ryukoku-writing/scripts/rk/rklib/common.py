@@ -68,30 +68,60 @@ def load_config(proj):
 POLICIES = ("allowed", "limited", "prohibited", "unknown")
 
 
+# The one rule for the ai_policy line, shared by the hooks (hookcore.py cfgcheck; lib.sh cfg_policy_bash is the same
+# rule for a computer without Python 3): the file is UTF-8, exactly one line starts with "ai_policy" followed by ":"
+# (indented or not), and that line is the key, optional spaces or tabs, one of the four lower-case values (optionally
+# in matching quotes), optional spaces or tabs, an optional "# comment", and an optional CR. Anything else on that line
+# (a no-break space, a vertical tab, a second word, upper case) makes the settings unreadable: the hooks deny
+# manuscript writes until it is fixed.
+POLICY_LINE = re.compile(r"^ai_policy[ \t]*:[ \t]*([\"']?)(allowed|limited|prohibited|unknown)\1[ \t]*(?:#[^\r\n]*)?\r?$")
+POLICY_KEY = re.compile(r"^[ \t]*ai_policy[ \t]*:")
+
+
 def config_problems(proj):
-    """Why .ryukoku/config.yml cannot be trusted as written: missing or unreadable, a key set on more than one line,
-    or ai_policy not exactly one of the four lower-case values. The hooks then treat the policy as unreadable and
-    deny manuscript writes."""
+    """Why .ryukoku/config.yml cannot be trusted as written: missing or unreadable (not UTF-8), a key set on more than
+    one line, or the ai_policy line not in the one accepted form (POLICY_LINE). The hooks then treat the policy as
+    unreadable and deny manuscript writes."""
     p = os.path.join(proj, MARKER)
     try:
-        with open(p, encoding="utf-8") as f:
-            lines = f.read().splitlines()
+        with open(p, "rb") as f:
+            raw = f.read()
+        text = raw.decode("utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        return ["%s を読めない(%s) / cannot read it" % (MARKER, type(e).__name__)]
+        return ["%s を読めない(%s。UTF-8 で保存する) / cannot read it (%s; save it as UTF-8)" % (MARKER, type(e).__name__, type(e).__name__)]
+    lines = text.split("\n")
     seen, out = {}, []
     for ln in lines:
         m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)[ \t]*:", ln)
         if m:
             seen[m.group(1)] = seen.get(m.group(1), 0) + 1
     for k, n in sorted(seen.items()):
-        if n > 1:
+        if n > 1 and k != "ai_policy":
             out.append("%s が %d 行ある(どちらが正しいか分からない) / %s is set on %d lines" % (k, n, k, n))
-    pol = load_config(proj).get("ai_policy")
-    if seen.get("ai_policy", 0) == 0:
+    pl = [ln for ln in lines if POLICY_KEY.match(ln)]
+    if not pl:
         out.append("ai_policy の行がない / no ai_policy line")
-    elif pol not in POLICIES:
-        out.append("ai_policy %r は allowed・limited・prohibited・unknown(小文字)のどれでもない / ai_policy %r is not one of the four values" % (pol, pol))
+    elif len(pl) > 1:
+        out.append("ai_policy が %d 行ある(どちらが正しいか分からない) / ai_policy is set on %d lines" % (len(pl), len(pl)))
+    elif not POLICY_LINE.match(pl[0]):
+        v = pl[0].split(":", 1)[1].strip(" \t\r")
+        out.append("ai_policy の行 %r は「ai_policy: allowed」の形(値は allowed・limited・prohibited・unknown の小文字、余分な文字なし)ではない / "
+                   "the ai_policy line %r is not of the form 'ai_policy: allowed' (one of the four lower-case values, nothing else)" % (v, v))
     return out
+
+
+def course_policy(proj):
+    """The course AI policy as the hooks decide it: one of the four values, or 'unreadable' when config_problems
+    finds anything."""
+    if config_problems(proj):
+        return "unreadable"
+    with open(os.path.join(proj, MARKER), encoding="utf-8") as f:
+        text = f.read()
+    for ln in text.split("\n"):
+        m = POLICY_LINE.match(ln)
+        if m:
+            return m.group(2)
+    return "unreadable"
 
 
 def set_config_value(proj, key, value):
