@@ -96,7 +96,9 @@ class ExecGate(Base):
     def test_running_a_script_the_ai_wrote_asks(self):
         """Write scratch/x.py then python3 scratch/x.py -> ask, naming the file."""
         self.assertEqual(self.E.ai_write(self.P + "/scratch/x.py", "print(1)\n"), "-")
-        for c in ["python3 scratch/x.py", "python3 -I -B scratch/x.py", "cd scratch && python3 x.py",
+        # (with a cd the directory is not followed: "cd scratch && python3 x.py" asks too, for an unknown file)
+        self.assertEqual(decision(self.E.pre("Bash", {"command": "cd scratch && python3 x.py"})), "ask")
+        for c in ["python3 scratch/x.py", "python3 -I -B scratch/x.py",
                   "echo $(python3 scratch/x.py)", "env python3 scratch/x.py"]:
             with self.subTest(c=c):
                 r = self.E.pre("Bash", {"command": c})
@@ -436,7 +438,9 @@ class CommentsAndLogs(Base):
         # ... and a route the hook cannot see is detected
         r = run_in_window(self.E, "Q=search-lo; python3 -c \"open('research/'+'$Q'+'g.jsonl','w').close()\"", "t-sl")
         self.assertIn("search-log.jsonl", reason(r))
-        r = run_in_window(self.E, "sed -e s/Walters/Other/ sources/references.json > /tmp/r.$$ && cat /tmp/r.$$ > sources/references.json", "t-ref")
+        # (after that detection the settings are not trusted until the student decides, so a recognised shell write
+        # to references.json is now denied up front; a route the hook cannot see is still detected)
+        r = run_in_window(self.E, "python3 -c \"p='sources/'+'references.json'; t=open(p).read().replace('Walters','Other'); open(p,'w').write(t)\"", "t-ref")
         self.assertIn("references.json", reason(r))
 
 

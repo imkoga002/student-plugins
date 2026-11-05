@@ -53,26 +53,32 @@ OPINION = ("と考える", "と考えられる", "と思われる", "だろう",
 # not exempt is reported even when it needs no source (the student can mark it: ./rk figures).
 UNITS = (r"%|パーセント|ポイント|percentage points?|per ?cent|percent|か国|カ国|ヵ国|ヶ国|ケ国|箇国|か所|カ所|ヶ所|箇所|"
          r"割|倍|位|人|名|件|冊|円|万|億|兆|社|校|学部|大学|館|店|時間|分|秒|日間|週間|か月|ヶ月|カ月|年間|点|ドル|歳|才|回|"
-         r"世帯|個|台|枚|本|頁|ページ|字|語|問|項目|times|million|billion|thousand|trillion|points?|hours?|minutes?|days?|"
+         r"世帯|個|台|枚|本|頁|ページ|字|語|times|million|billion|thousand|trillion|points?|hours?|minutes?|days?|"
          r"weeks?|years? old|respondents?|students?|books?|people|persons?|items?|cases?|participants?|visitors?|users?")
 KANJI_NUM = "〇一二三四五六七八九十百千万億兆数"
 COUNTERS_J = (r"%|パーセント|ポイント|か国|カ国|ヵ国|ヶ国|ケ国|か所|カ所|ヶ所|箇所|割|倍|位|人|名|件|冊|円|社|校|学部|大学|館|店|"
-              r"時間|分|秒|日間|週間|か月|ヶ月|カ月|年間|点|ドル|歳|才|回|世帯|個|台|枚|本|頁|ページ|字|語|問|項目|万|億|兆")
+              r"時間|分|秒|日間|週間|か月|ヶ月|カ月|年間|点|ドル|歳|才|回|世帯|個|台|枚|本|頁|ページ|字|語|万|億|兆")
 NUM = re.compile(r"(?<![0-9A-Za-z.])\d[\d,]*(?:\.\d+)?(?:\s*/\s*\d+)?(?:\s*(?:" + UNITS + r"))?(?:\s*の\s*\d+)?"
                  r"|[" + KANJI_NUM + r"]+\s*(?:" + COUNTERS_J + r")")
 _YEAR = r"(?:1[5-9]\d{2}|20\d{2})"
+# software whose version numbers follow its name (a version is exempt only after one of these or v/ver/version)
+PRODUCTS = (r"Python|R|Stata|SPSS|Excel|Word|PowerPoint|Office|pandoc|Pandoc|Windows|macOS|iOS|Android|Ubuntu|Debian|"
+            r"Node(?:\.js)?|Java|MATLAB|SAS|Mplus|Amos|JASP|jamovi|Zotero|LaTeX|TeX Live|Chrome|Firefox|Safari|"
+            r"PostgreSQL|MySQL|SQLite|Claude Code|NVivo|MAXQDA|KH Coder|HAD")
 NOT_FIGURE = re.compile(
     r"(?<![\d.,])" + _YEAR + r"(?:\s*[-–—〜~～]\s*" + _YEAR + r")?\s*(?:年度|年代|年|s\b)"
     r"|(?<![\d.,])" + _YEAR + r"\s*[-–—〜~～]\s*" + _YEAR + r"(?![\d.,])"
-    r"|(?<![\d.,])" + _YEAR + r"(?![\d.,]|\s*(?:" + UNITS + r"))"
+    r"|\b(?:[Ii]n|[Ss]ince|[Bb]y|[Uu]ntil|[Tt]ill|[Ff]rom|[Dd]uring|[Oo]f|[Bb]etween|[Aa]fter|[Bb]efore|[Aa]round|[Cc]irca)\s+" + _YEAR + r"(?![\d.,])"
+    r"|(?<![\d.,])" + _YEAR + r"\s*[/.\-]\s*\d{1,2}(?:\s*[/.\-]\s*\d{1,2})?(?![\d])"
     r"|\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?|(?<!\d)\d{1,2}\s*日(?!間)|(?:午前|午後)\s*\d{1,2}\s*時(?:\s*\d{1,2}\s*分)?"
     r"|(?<!\d)\d{1,2}\s*時(?!間)(?:\s*\d{1,2}\s*分)?|(?<!\d)\d{1,2}:\d{2}(?!\d)"
     r"|(?:図|表|式|写真|資料|付録|別表|設問|問|Q|Figure|Fig\.|Table|Tab\.|Eq\.|Equation|Appendix|Section|Sec\.|Chapter|Ch\.|"
     r"§|第|節|章|項|pp?\.)\s*[(（]?\s*\d+(?:\s*[.\-‐–]\s*\d+)*\s*[)）]?"
     r"|\d+(?:\.\d+)*\s*(?:節|章|項|条|編)"
-    r"|[(（]\s*\d+(?:\.\d+)*\s*[)）]"
-    r"|\b[vV](?:er\.?|ersion)?\s?\d+(?:\.\d+)+|\bver\.?\s*\d+(?:\.\d+)*|\b\d+\.\d+\.\d+(?:\.\d+)*"
-    r"|(?<![A-Za-z])[A-Z][A-Za-z+#]*\s*v?\d+(?:\.\d+)+(?![\d.])(?!\s*(?:" + UNITS + r"))"
+    r"|[(（]\s*\d+(?:\.\d+)*\s*[)）](?!\s*(?:" + UNITS + r"))"
+    r"|\b[vV](?:er\.?|ersion)?\s?\d+(?:\.\d+)+|\b[Vv]er(?:sion)?\.?\s*\d+(?:\.\d+)*|\b\d+\.\d+\.\d+(?:\.\d+)*"
+    r"|(?<![A-Za-z])(?:" + PRODUCTS + r")\s*v?\d+(?:\.\d+)*(?![\d.])"
+    r"|\d+\s*(?:段階|群|問|項目|件法|回目|波)|[" + KANJI_NUM[:-1] + r"]+\s*(?:段階|群|問|項目|件法|回目|波)"
     r"|\b(?:ISO|IEC|JIS|IEEE|RFC|ANSI|DIN|EN|BS|ECMA|ITU-T|ISBN|ISSN|DOI|NCID|CRID)(?:/IEC)?\s*[A-Z]?\s*[-:/]?\s*\d[\d.\-:/]*"
     r"|\d+\s*(?:回目|番目|つ目|人目|度目|件目|冊目|日目|年目)|\d+\s*(?:人|件|冊|個|つ|名|問)\s*ずつ|(?<!\d)[1-9]\s*つ"
     r"|(?m:^\s*\d+[.)]\s)")
@@ -129,30 +135,79 @@ def excerpt_sources(proj):
     return out
 
 
+def trusted_data(proj, relp):
+    """A data file counts as a source when it exists under data/raw/ or data/processed/, was not written or changed
+    by an AI tool call (execgate's list of AI-written files, by path and content hash; msguard records every file a
+    call changed), and, under data/raw/, is in the data manifest with the same content (rk.py data add)."""
+    from . import execgate
+    relp = relp.replace("\\", "/").lstrip("./")
+    if not re.match(r"^data/(raw|processed)/", relp) or ".." in relp.split("/"):
+        return False
+    full = os.path.join(proj, relp)
+    if not os.path.isfile(full):
+        return False
+    real = os.path.realpath(full)
+    ai = execgate.ai_files()
+    shas = {v.get("sha") for v in ai.values() if isinstance(v, dict) and v.get("sha")}
+    sha = execgate._sha(real)
+    if real in ai or sha in shas:
+        return False
+    if relp.startswith("data/raw/"):
+        from .datacheck import read_manifest
+        try:
+            man = read_manifest(os.path.join(proj, "data", "manifest-sha256.txt"))
+        except ValueError:
+            return False
+        from .common import sha256_file
+        return man.get(relp) == sha256_file(full)
+    return True
+
+
 def numeric_values(proj):
+    """Values of data/numeric-claims.csv rows that check out: the data file is trusted (trusted_data), the key names
+    exactly one row and the cell equals the value (the same rule as rk.py data numbers). A row that does not check
+    out exempts nothing."""
     import csv
     p = os.path.join(proj, "data", "numeric-claims.csv")
     vals = set()
     try:
         with open(p, newline="", encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                if r.get("text_value"):
-                    vals.add(r["text_value"].strip())
-    except OSError:
-        pass
+            rows = list(csv.DictReader(f))
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return vals
+    for r in rows:
+        tv = (r.get("text_value") or "").strip()
+        rel_ = (r.get("file") or "").strip()
+        if not tv or not trusted_data(proj, rel_):
+            continue
+        try:
+            with open(os.path.join(proj, rel_), newline="", encoding="utf-8") as g:
+                hit = [x for x in csv.DictReader(g) if x.get(r.get("key_column") or "") == r.get("key")]
+        except (OSError, UnicodeDecodeError, csv.Error):
+            continue
+        if len(hit) != 1:
+            continue
+        cell = (hit[0].get(r.get("column") or "") or "").strip()
+        want = tv.replace(",", "").rstrip("%％").strip()
+        try:
+            ok = abs(float(cell.replace(",", "").rstrip("%％")) - float(want)) < 1e-9
+        except ValueError:
+            ok = cell == tv
+        if ok:
+            vals.add(tv)
     return vals
 
 
 def has_source(par_text, notes, proj=None):
-    """A citation, or a reference to a data file under data/raw|processed/ (in the paragraph or its footnotes). With
-    PROJ, a data reference counts only when that file exists."""
+    """A citation, or a reference to a trusted data file (trusted_data) in the text or its footnotes. Without PROJ,
+    any data reference counts (used where no project is at hand)."""
     t = par_text
     for lab in FOOTREF.findall(par_text):
         t += "\n" + notes.get(lab, "")
     if provenance.citekeys(t):
         return True
     for m in DATAREF.finditer(t):
-        if proj is None or os.path.isfile(os.path.join(proj, m.group(0).rstrip(".,;:)）」』"))):
+        if proj is None or trusted_data(proj, m.group(0).rstrip(".,;:)）」』")):
             return True
     return False
 
@@ -198,17 +253,15 @@ def figure_subject(sentence, tok):
 
 
 def figure_marks(proj):
-    """{subject: digest} of the student's light confirmations 'this figure needs no source' (kind figure,
-    decision no_source_needed, recorded at the terminal with ./rk figures; the AI cannot write .ryukoku/)."""
+    """{subject: digest} of the student's light confirmations 'this figure needs no source' (kind figure, decision
+    no_source_needed, recorded at the terminal with ./rk figures). Only confirmations that count under
+    sign.valid_index are taken (written by the plugin's student-only path or appended outside any AI tool call)."""
     from . import sign
+    idx, _b = sign.valid_index(proj, {})
     out = {}
-    try:
-        recs = sign.read_signoffs(proj)
-    except Exception:  # noqa: BLE001
-        return out
-    for r in recs:
-        if r.get("kind") == "figure" and r.get("decision") == "no_source_needed" and sign.is_light(r) and sign.verify_record(r, {})[0]:
-            out[r.get("subject")] = r.get("digest")
+    for (kind, subj), recs in idx.items():
+        if kind == "figure" and recs and recs[-1].get("decision") == "no_source_needed":
+            out[subj] = recs[-1].get("digest")
     return out
 
 

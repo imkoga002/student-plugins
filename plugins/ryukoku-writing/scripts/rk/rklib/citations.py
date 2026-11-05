@@ -429,3 +429,20 @@ def entry_mismatches(row, entry, meta=None):
     if extra:
         out.append("extra:" + "/".join(extra[:5]))
     return out
+
+
+def unverified(proj, keys):
+    """Keys among KEYS whose ledger row has no current, signed VERIFIED by a trusted signer (the digest covers the
+    printed entry: subjects.rendered_entry)."""
+    from . import sign, subjects, trust
+    trusted, _p, _n = trust.local_trusted(proj)
+    idx, _b = sign.valid_index(proj, trusted)
+    by = _ledger_by_key(proj)
+    srcs = {x.sid: x for x in subjects.sources(proj)}
+    out = []
+    for k in sorted(keys):
+        r = by.get(k)
+        x = srcs.get(r.get("id")) if r else None
+        if not (x and x.claimed == "VERIFIED" and sign.current(idx, "source", x.sid, x.digest, ("VERIFIED",))):
+            out.append(k)
+    return out

@@ -315,6 +315,10 @@ def cmd_verify(proj, ids=None):
         term.say("\n" + term.c(term.t("文献 ", "source ") + s.sid, "1") + "  %s / %s / %s" % (c.get("title"), c.get("authors"), c.get("year")))
         term.say("  ids: doi=%s isbn=%s ncid=%s crid=%s ndl=%s url=%s" % tuple(c.get(k, "") for k in ("doi", "isbn", "ncid", "crid", "ndl_id", "url")))
         term.say("  " + term.t("機械の状態: ", "machine: ") + "%s  %s" % (c.get("machine_status"), (c.get("machine_note") or "")[:200]))
+        rd = c.get("rendered") or {}
+        names = "; ".join(" ".join(x for x in (n.get("family"), n.get("given"), n.get("literal")) if x) for n in (rd.get("author") or []) + (rd.get("editor") or []))
+        term.say("  " + term.t("文献一覧に出る形: ", "printed as: ") + "%s / %s / %s / %s" % (
+            rd.get("title", ""), names, ((rd.get("issued") or {}).get("date-parts") or [[""]])[0][0], rd.get("container-title", "")))
         k = term.key(term.t("  現物(または公式の画面)で書誌を確かめたか? [v]VERIFIED [x]使わない(REJECTED) [s]保留 [q]ここまで > ",
                             "  checked the bibliographic data on the item itself? [v]erified [x] not used (REJECTED) [s]kip [q]stop > "), "vxsq")
         if k == "q":

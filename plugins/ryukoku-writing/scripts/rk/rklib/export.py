@@ -353,13 +353,21 @@ def build(proj, fmt="docx", out=None, files=None):
         if probs:
             warns.append("見本の書き出し: 台帳で確かめていない引用 %s は文献一覧に出ない" % ", ".join(k for k, _w in probs[:8]))
         items, _bad = citations.csl_items(proj, keys, star=sc["star"])
+        # an entry is printed whether or not the student has read the original; say which are not VERIFIED (the
+        # submission check makes it an error). VERIFIED covers the printed entry, so a changed entry shows here too
+        unv = citations.unverified(proj, {it["id"] for it in items})
+        if unv:
+            warns.append(tr(feedback_lang(proj), "原典を読んだ確認(VERIFIED)が無い、または確認の後に文献一覧に出る形が変わった文献: %s(提出の段階の検査ではエラー)" % ", ".join(unv[:8]),
+                            "Not VERIFIED by you, or the printed entry changed after you verified it: %s (an error at the submission check)" % ", ".join(unv[:8])))
         gen = os.path.join(work, "bibliography.json")
         with open(gen, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False)
         safe["bibliography"] = gen
         csl = safe.get("csl")
         if not csl:
-            r0 = subprocess.run(["pandoc", "--print-default-data-file", "default.csl"], cwd=work, capture_output=True, timeout=60)
+            os.makedirs(os.path.join(work, "pandoc-data"), exist_ok=True)
+            r0 = subprocess.run(["pandoc", "--data-dir", os.path.join(work, "pandoc-data"), "--print-default-data-file", "default.csl"],
+                                cwd=work, capture_output=True, timeout=60)
             if r0.returncode == 0 and r0.stdout:
                 csl = os.path.join(work, "default.csl")
                 with open(csl, "wb") as f:
@@ -380,7 +388,10 @@ def build(proj, fmt="docx", out=None, files=None):
         safe_defaults = os.path.join(work, "defaults.json")  # built by the plugin, not the project's file
         with open(safe_defaults, "w", encoding="utf-8") as f:
             json.dump(safe, f, ensure_ascii=False)
-        cmd = ["pandoc", "--defaults", safe_defaults, "--resource-path", work + os.pathsep + proj, "-o", produced] + copies
+        # an empty user data directory: templates, filters and defaults in ~/.local/share/pandoc are not used
+        ddir = os.path.join(work, "pandoc-data")
+        os.makedirs(ddir, exist_ok=True)
+        cmd = ["pandoc", "--data-dir", ddir, "--defaults", safe_defaults, "--resource-path", work + os.pathsep + proj, "-o", produced] + copies
         r = subprocess.run(cmd, cwd=work, capture_output=True, timeout=600)
         if r.returncode != 0:
             raise RkError("pandoc が失敗した: " + r.stderr.decode("utf-8", "replace")[:800])

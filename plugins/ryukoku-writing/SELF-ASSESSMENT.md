@@ -17,15 +17,15 @@ $ HOME=<一時フォルダ> TMPDIR=<一時フォルダ> RK_STATE_HOME=<一時フ
 test_no_private_terms_anywhere (test_init_export.Init.test_no_private_terms_anywhere) ... skipped 'no private term list (set RK_PRIVATE_TERMS_FILE or create tests/private-terms.txt)'
 test_live_identity_mismatch_not_found_and_retraction (test_research.Verifier.test_live_identity_mismatch_not_found_and_retraction) ... skipped 'set RK_NET_TESTS=1 for live API tests'
 ----------------------------------------------------------------------
-Ran 263 tests in 773.102s
+Ran 275 tests in 771.301s
 
 OK (skipped=2)
 ALL OK
 
-real	12m53.861s
+real	12m52.015s
 ```
 
-内訳(試験の数): test_hooks 34、test_detect 13、test_sign 18、test_proposals 17、test_research 15、test_init_export 14、test_notebook 11(Playwright を含む)、test_safeguards 44、test_allowlist_trust 19、test_config_execution 15、test_export_hardening 7、test_v2 24、test_sources_and_windows 16、test_bibliography_and_shell 16。
+内訳(試験の数): test_hooks 34、test_detect 13、test_sign 18、test_proposals 17、test_research 15、test_init_export 14、test_notebook 11(Playwright を含む)、test_safeguards 44、test_allowlist_trust 19、test_config_execution 15、test_export_hardening 7、test_v2 24、test_sources_and_windows 16、test_bibliography_and_shell 16、test_records_and_rules 12。
 
 v1 の試験のうち、v2 で意味が変わったものは書き換えた。原稿の検知を「戻す」と判断する試験は、v2 で原稿の検知そのものがなくなったので、守られたファイルの検知を判断する試験に置き換えた:
 - 「原稿に書けない」試験は、科目の条件ごとの期待に: allowed は allow と由来の記録、limited と unknown は ask、prohibited は deny、見分けられる書き方のシェルからはどの条件でも deny(`test_hooks.Policy`、`test_hooks.PreToolUse` のパスの正規化の試験は「unknown で ask、理由が原稿のもの」を確かめる形に)。
@@ -72,12 +72,12 @@ $ claude plugin validate --strict .                           # リポジトリ�
 
 ### 2.5 敵対的な検証で見つかった欠陥と対応
 
-独立した敵対的な検証で見つかった欠陥と、今の対応。再現は、そのまま回帰の試験にした(`tests/test_v2.Hardening`、`tests/test_sources_and_windows.py`、`tests/test_bibliography_and_shell.py`、既存の試験の書き換え)。点の修正では収まらなかったもの(文献一覧の中身、条件つきの `cd`、窓の記録の競合、数字)は、構造で閉じ直した。設計の説明は DESIGN.md §3.12。**今の版は、最後の修正の後の検証を受けていない。**
+独立した敵対的な検証で見つかった欠陥と、今の対応。再現は、そのまま回帰の試験にした(`tests/test_v2.Hardening`、`tests/test_sources_and_windows.py`、`tests/test_bibliography_and_shell.py`、`tests/test_records_and_rules.py`、既存の試験の書き換え)。点の修正では収まらなかったもの(文献一覧の中身、条件つきの `cd`、窓の記録の競合、数字)は、構造で閉じ直した。設計の説明は DESIGN.md §3.12。**今の版は、最後の修正の後の検証を受けていない。**
 
 | 見つかった欠陥 | 対応 | 試験 |
 |---|---|---|
 | glob・バックスラッシュを使うシェルの書き込みが原稿・記録・問いに確認なしで届く | 字句解析の後のパスで分類して deny | `test_v2.Hardening.test_shell_writes_to_protected_paths_are_denied_under_every_policy` |
-| `||`・パイプ・`&`・制御の中の `cd` を無条件に追い、行き先がずれて原稿や `.ryukoku/config.yml` に届く(設定を書き換えられる) | `cd`・`pushd`・`popd` は bash が確実に通る位置でだけ追い、ほかは残り全部で行き先を不明に。存在しない行き先、`CDPATH` が効きうる相対の `cd` も不明に。AI の実行中に設定が変わった検知が未判断なら、設定を読めないとみなす | `test_bibliography_and_shell.ConditionalDirectoryChanges`、`test_sources_and_windows.DirectoryChanges` |
+| `cd` の行き先を追う方式が三度ずれた(`||` の後、`&&` の連鎖の途中の失敗、`&&`・`||`・`|` の後の改行)。原稿・設定・台帳・思考の記録などに届き、設定を書き換えられた | ディレクトリの移動を一切追わない。移動(か、そうなりうる語)が一つでもあれば、そのコマンドの相対の書き込み先はすべて不明(`prohibited`・設定を信用できないとき・守られた名前なら deny、ほかは確認)。`&&`・`||`・`|` の後の改行は続き。未判断の検知が一件でもあれば設定を信用しない | `test_records_and_rules.NoDirectoryTracking`、`test_bibliography_and_shell.ConditionalDirectoryChanges` |
 | 由来の記録への、連鎖を保った偽の行の追記 | Plugin のコードが書いた行のハッシュを外に控え、控えに無い追記を検知 | `test_v2.Hardening.test_forged_provenance_lines_are_detected` |
 | シンボリックリンク、MCP の道具の別の名前の欄、配列や入れ子の中のパス、`command` とパスを両方持つ道具 | リンクをたどる。入力を JSON として読み、すべての文字列を見る。相対パスは確認(`prohibited` で deny) | `test_v2.Hardening.test_symlinked_file_and_other_field_names`、`test_bibliography_and_shell.ToolInputs` |
 | 人間専用のコマンドの一覧の食い違い、サブコマンドの前のオプション・省略したオプション | 一覧を一つに。`allow_abbrev=False` | `test_v2.Hardening.test_one_list_of_human_only_commands`、`test_sources_and_windows.HumanCommandOptions` |
@@ -88,9 +88,17 @@ $ claude plugin validate --strict .                           # リポジトリ�
 | 設定の読み方がフックと道具で違う | 判定を一つに(`config_problems`) | `test_sources_and_windows.SettingsFile` |
 | CI と Git フックへの AI の書き込みが確認だけ | deny | `test_sources_and_windows.CiAndTools` |
 | 長いツールの実行・重なった呼び出し・並行した呼び出しで、AI の書き込みが学生の編集になる | 窓は PostToolUse まで開いたまま、窓の記録はロックの中で読み書きし、記録から漏れた窓の写しがあれば「AI の可能性」に | `test_sources_and_windows.ToolWindows`、`test_bibliography_and_shell.ParallelWindows` |
+| 軽い確認に秘密が無く、AI のツールの実行中に足した偽の判断が数えられた(検知の判断を偽って設定の検知を外せた) | 軽い確認は、Plugin の学生専用の経路で書いた行か、AI のツールの実行の外で足された行だけを数える。主張カード・数字の印・guarded・検知の判断に同じ規則 | `test_records_and_rules.LightConfirmations` |
+| 台帳・`identity.json`・`annotations.json` が監視の外。VERIFIED が出る書誌を覆わない。`identity.json` が提出前の確認に入らない。重複した引用キー | 監視に入れる(Plugin の道具が書いた内容なら検知にしない)。VERIFIED のダイジェストを出る CSL の項目そのものに。提出前の確認に `identity.json` と出しうる文献一覧を入れる。書き出しは VERIFIED の無い文献を注意に。キーの重複を拒む | `test_records_and_rules.LedgerAndVerified` |
+| AI が数字の免除を作れた(存在しないファイルを指す `numeric-claims.csv` の行、AI が作った `data/processed/` のファイル)。`rk check` が `numeric-claims.csv` を確かめない | AI のツールが書いたファイルはデータの出典にしない。`numeric-claims.csv` は確かめられる行だけを数え、確かめられない行は `rk check` が出す | `test_records_and_rules.FigureExemptions` |
+| 数字の見落とし(4 桁の数を年として除く、`Mean 3.42` を版として除く、括弧の数と単位)と、方法の節の誤検出(N 段階・N 群・N 問) | 年は年の形のときだけ、版は `v`・`ver`・製品の名前の後だけ。調査の設計の要素の数は除く | `test_records_and_rules.FigureRules` |
+| 道具の入力の `edits` の配列・空白を含む絶対パス・`file://` | 本文の欄の値だけを飛ばし、ほかはすべてたどる | `test_records_and_rules.ToolInputs` |
+| ロックの待ち時間切れで窓が無く、AI の段落が学生の編集になった | 閉じる側に倒す(確認を出す)。印を残し、次の窓で「AI の可能性」に | `test_records_and_rules.LockTimeout` |
+| pandoc の利用者のデータフォルダのテンプレートが使われた | `--data-dir` に空のディレクトリ | `test_records_and_rules.PandocUserData` |
+| 番地の形の無い住所を見落とした | 「都道府県 + 市区郡町村 + 町名など + 番号」を足す | `test_records_and_rules.Addresses` |
 | `export --file` の見本に検査が無い | 名前に `-sample` を付けて警告。文献一覧は台帳から作り、差し替えの指定は拒む | `test_bibliography_and_shell.Bibliography.test_a_file_outside_the_manuscript_is_exported_as_a_sample` |
 
-直せなかったこと・直さなかったこと: 学生が許可したプログラムは何でもできる(README の脅威モデル)。地の文の「著者(年)」と普通の文で打った文献の一覧は照合できない。CiNii・NDL で確かめた資料の著者・年は、機械の照合が記録しないので台帳の行の値になる。見分けられない書き方のシェルのコマンドは確認に回すだけ。DNS でこの PC を指す名前は見分けられない。言葉で書いた数は漏れる。
+直せなかったこと・直さなかったこと: 学生が許可したプログラムは何でもできる(README の脅威モデル)。記録の行の信用(AI の実行の外で足された行か)は、その PC の控えでしか見分けられず、CI と初めての PC では見分けない。地の文の「著者(年)」と普通の文で打った文献の一覧は照合できない。CiNii・NDL で確かめた資料の著者・年は、機械の照合が記録しないので台帳の行の値になる。見分けられない書き方のシェルのコマンドは確認に回すだけ。DNS でこの PC を指す名前は見分けられない。言葉で書いた数は漏れる。
 
 ## 3. 要件ごとの充足度
 
@@ -133,8 +141,10 @@ $ claude plugin validate --strict .                           # リポジトリ�
 - 書き出しの文献一覧は台帳から作る(IDENTITY_CONFIRMED の行だけ。`sources/identity.json` の登録機関の書誌を優先し、無い欄は台帳の行の値)。CiNii・NDL で確かめた資料の著者・年などは機械の照合が記録しないので、台帳の行の値になる(提出の段階では学生の VERIFIED の署名が覆う)。題名か名前の無い台帳の行は引けない。識別子の無い資料は、識別子を足さない限り引けない(厳しすぎる場合がある)。`sources/references.json` は書き出しに使わず、台帳との違いを `./rk check` が知らせるだけ。地の文の「著者(年)」と普通の文で打った文献の一覧は照合しない。以前の版で `refcheck` を回した文献は `identity.json` の記録が無く、台帳の行の値で出る(`rk.py refcheck check` をやり直すと記録される)。
 - 出典のない数字の検査は、本文のすべての数を候補にし、除外の一覧(年・日付・時刻・図表や式や節の参照・版・規格の番号・序数・行頭の番号・見出しやコードの中)を外す推定。言葉で書いた数(「三つ」「three」「半数」)と表の中の数は見ない。逆に、出典の要らない数も数える(学生が `./rk figures` で印を付ける。文が変わると外れる)。出典は文ごとに見るので、段落の最後にだけ引用がある書き方では前の文の数が出る。
 - 確認で断った呼び出しの後、そのターンの間に学生が自分で直した段落は「AI の可能性」になる(多めに AI の側に数える向きの誤り)。
+- 未判断の検知が一件でもあると、AI は原稿に書けない(誤検知でも、学生が `./rk changes` で判断するまで)。
+- データの出典は、AI のツールが書いたファイルを除く。AI の一覧はその PC にだけあるので、CI と別の PC では除けない。学生が AI に作らせた加工データは出典にならない(学生が自分で作るか、生データから自分で確かめる)。
 - 証拠ノートは、学生が端末で `./rk notebook` を実行して開く(鍵は端末にだけ出る)。以前の「AI が画面を起動する」流れより手間が一つ増えた。鍵は、学生が許可したプログラムなら端末の出力やブラウザの保存域から読める。
-- シェルの書き込みの事前の判定は、見分けられる書き方(リダイレクト・書き込みのコマンド・`-i`・`-o`)に限る。アーカイブの展開・`patch`・`git apply`・`xargs`・`find -exec`・インタープリタ・コマンド置換・ヒアドキュメントなどは確認になり、学生が許可すれば通る(その後は由来か検知に残る。試験 `test_sources_and_windows.ToolWindows`)。行き先の分からない書き込み(条件つきの `cd` の後を含む)は、`prohibited` の科目・設定を信用できないとき・記録のファイルの名前のときに deny で、それ以外は確認になる。
+- シェルの書き込みの事前の判定は、見分けられる書き方(リダイレクト・書き込みのコマンド・`-i`・`-o`)に限る。ディレクトリの移動は追わないので、`cd` を含むコマンドの相対の書き込みはいつも確認になる(`prohibited` と守られた名前では deny)。手間は増えるが、ずれは起きない。アーカイブの展開・`patch`・`git apply`・`xargs`・`find -exec`・インタープリタ・コマンド置換・ヒアドキュメントなどは確認になり、学生が許可すれば通る(その後は由来か検知に残る)。
 - 追記の偽造の検知は、Plugin のコードが書いた行のハッシュの控え(プロジェクトの外)と比べる。学生が許可したスクリプトが Plugin のコードを呼んで書いた行は区別できない。控えはその PC にだけあるので、CI では使わない(CI は基準ブランチの続きであることだけを確かめる)。
 - `rk check` は学生の編集(推定)を記録するので、`git commit` の pre-commit で `rk check` が走ると、`.ryukoku/provenance.jsonl` に追記が残ることがある(次の commit に入る)。
 - prohibited の科目では、Bash の `python3 -c '…manuscript…'` のような原稿を名指しするインラインのコードは、読み取りでも deny になる(v1 の「書き込みの操作と原稿のパスが並ぶ形を止める」規則による)。読み取りは Read を使う。

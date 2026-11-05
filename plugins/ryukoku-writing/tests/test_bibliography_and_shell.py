@@ -195,23 +195,21 @@ class ConditionalDirectoryChanges(unittest.TestCase):
             self.assertEqual(decision(E.pre("Bash", {"command": "cd res?arch || cd ..; echo x > notes.md"})), "deny")
             E.set_policy("allowed")
             self.assertEqual(decision(E.pre("Bash", {"command": "cd res?arch || cd ..; echo x > notes.md"})), "ask")
-            # an unconditional cd is still followed
-            self.assertEqual(decision(E.pre("Bash", {"command": "cd research && echo x > notes.md"})), "-")
+            # the directory is never followed: any cd makes relative write targets unknown (ask); without one they
+            # resolve against the tool's working directory
+            self.assertEqual(decision(E.pre("Bash", {"command": "cd research && echo x > notes.md"})), "ask")
+            self.assertEqual(decision(E.pre("Bash", {"command": "echo x > research/notes.md"})), "-")
         finally:
             E.cleanup()
 
-    def test_cdpath_in_a_shell_startup_file_makes_relative_cd_unknown(self):
+    def test_any_directory_change_makes_relative_targets_unknown(self):
         E = Env()
-        old = os.environ.get("HOME")
         try:
-            os.makedirs(E.path("research"), exist_ok=True)
-            self.assertNotIn("unknown_target", [k for k, _w in execgate.scan("cd research && echo x > a.md", E.proj, PLUGIN, E.proj)])
-            os.environ["HOME"] = E.home
-            with open(os.path.join(E.home, ".bashrc"), "w") as f:
-                f.write("export CDPATH=.:~/elsewhere\n")
-            self.assertIn("unknown_target", [k for k, _w in execgate.scan("cd research && echo x > a.md", E.proj, PLUGIN, E.proj)])
+            for cmd in ("cd research && echo x > a.md", "pushd research; echo x > a.md", "$D research; echo x > a.md",
+                        "c? research; echo x > a.md", "echo cd; echo x > a.md"):
+                self.assertIn("unknown_target", [k for k, _w in execgate.scan(cmd, E.proj, PLUGIN, E.proj)], cmd)
+            self.assertNotIn("unknown_target", [k for k, _w in execgate.scan("echo x > research/a.md", E.proj, PLUGIN, E.proj)])
         finally:
-            os.environ["HOME"] = old
             E.cleanup()
 
     def test_a_settings_change_detected_during_an_ai_call_closes_manuscript_writes(self):
@@ -229,7 +227,8 @@ class ConditionalDirectoryChanges(unittest.TestCase):
             self.assertTrue(any("検知" in p for p in common.config_problems(E.proj)))
             r = E.pre("Write", {"file_path": mp, "content": "x"})
             self.assertEqual(decision(r), "deny")
-            ids = [x for x in common.config_problems(E.proj)[0].split("検知 ")[1].split(")")[0].split(", ")]
+            from rklib import msguard
+            ids = msguard.open_detections(E.proj)
             rc, out = E.tty(["sign", "change", ids[0], "--decision", "mine"], ["y"])
             self.assertEqual(rc, 0, out[-1500:])
             self.assertEqual(common.config_problems(E.proj), [])
@@ -334,15 +333,15 @@ class Numbers(unittest.TestCase):
         try:
             E.setup()
             with open(E.path(MS), "a", encoding="utf-8") as f:
-                f.write("\n本調査では回答者を 30 人ずつの 4 群に分けた。\n")
+                f.write("\n本稿では例として 3 冊の本を挙げる。\n")
             out = ng(E.rk("check", "--submit").stdout)
-            self.assertTrue(any("「4」" in l or "4 群" in l or "「4" in l for l in out), out)
+            self.assertTrue(any("3 冊" in l for l in out), out)
             rc, tr = E.tty(["figures"], ["y"] * 6)
             self.assertEqual(rc, 0, tr[-1500:])
             self.assertFalse(any("出典の引用もデータ" in l for l in ng(E.rk("check", "--submit").stdout)))
             # the AI cannot write the mark; and a changed sentence drops it
             self.assertEqual(decision(E.pre("Write", {"file_path": E.path(".ryukoku", "signoffs.jsonl"), "content": "{}"})), "deny")
-            t = open(E.path(MS), encoding="utf-8").read().replace("4 群", "5 群")
+            t = open(E.path(MS), encoding="utf-8").read().replace("3 冊", "4 冊")
             open(E.path(MS), "w", encoding="utf-8").write(t)
             self.assertTrue(any("出典の引用もデータ" in l for l in ng(E.rk("check", "--submit").stdout)))
         finally:

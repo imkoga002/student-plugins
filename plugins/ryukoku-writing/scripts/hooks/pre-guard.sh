@@ -93,7 +93,15 @@ fi
 guard_pre() {
   case "$KIND" in
     write|shell|other)
-      have_python && pyrun -I -B "$RK_HOOKCORE" pre "$PROJ" "$TUID" "${1:-run}" >/dev/null 2>&1 ;;
+      if have_python; then
+        GP="$(pyrun -I -B "$RK_HOOKCORE" pre "$PROJ" "$TUID" "${1:-run}" 2>/dev/null || true)"
+        case "$GP" in
+          *lockfail*)
+            # no window could be opened (the window store stayed locked): fail closed. The student decides; what
+            # changes until the next window is recorded as uncertain (the AI's side)
+            [ "${1:-run}" = ask ] || pre_decide ask "$NAME: $(t "変更の検知の準備(窓の記録のロック)が時間内にできなかった。このまま動くと、書き込みの由来を正確に記録できない(次の窓まで『AI の可能性』として記録する)。少し待ってからもう一度試すか、内容を確かめて許可する。" "The change detection could not be prepared in time (the window store stayed locked). If this runs now, its writes cannot be attributed exactly (they are recorded as 'uncertain' until the next window). Retry shortly, or allow after checking it.")$OUTSIDE" ;;
+        esac
+      fi ;;
   esac
   return 0
 }

@@ -95,9 +95,12 @@ class AllowList(Base):
         self.assertFalse(os.path.exists(self.E.path("pwned.txt")))
 
     def test_allow_list_runs_without_asking(self):
-        for c in ALLOWED + ["cd %s && python3 tools/rk/rk.py status" % self.P]:
+        for c in ALLOWED:
             with self.subTest(c=c):
                 self.assertEqual(self.d(c)[0], "-", c)
+        # the shell's directory is not followed: after a cd, a relative script path is unknown and asks
+        self.assertEqual(self.d("cd %s && python3 tools/rk/rk.py status" % self.P)[0], "ask")
+        self.assertEqual(self.d("cd %s && python3 %s/tools/rk/rk.py status" % (self.P, self.P))[0], "-")
 
     def test_reasons_name_the_command(self):
         d, r = self.d("make -C scratch")

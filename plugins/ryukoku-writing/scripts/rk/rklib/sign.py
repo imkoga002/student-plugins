@@ -305,14 +305,38 @@ def append_signoffs(proj, recs):
                 note_written(proj, SIGNOFFS_REL, [line])
 
 
+def _trusted_lines(proj):
+    """Hashes of the signoffs lines this computer knows were written by the plugin's own code or appended outside any
+    AI tool call (common.note_written; msguard notes the latter). None when this computer has no such notes (CI, a
+    fresh clone before any hook ran): nothing can be told apart there, and nothing is filtered."""
+    from .common import _written_path, written_hashes
+    if not os.path.exists(_written_path(proj, SIGNOFFS_REL)):
+        return None
+    return written_hashes(proj, SIGNOFFS_REL)
+
+
 def valid_index(proj, trusted):
-    """{(kind, subject): [valid records, oldest first]} and a list of problems for records that do not verify."""
+    """{(kind, subject): [valid records, oldest first]} and a list of problems for records that do not verify. A light
+    confirmation counts only when its line is a trusted one (_trusted_lines): one that appeared during an AI tool
+    call, or that the plugin's code did not write, is not a decision (light confirmations carry no secret)."""
     idx, probs = {}, []
     try:
         recs = read_signoffs(proj)
     except RkError as e:
         return idx, [str(e)]
-    for r in recs:
+    ok_lines = _trusted_lines(proj)
+    raw_lines = []
+    if ok_lines is not None:
+        try:
+            with open(os.path.join(proj, SIGNOFFS_REL), encoding="utf-8") as f:
+                raw_lines = [x.rstrip("\r\n") for x in f if x.strip()]
+        except OSError:
+            raw_lines = []
+    for n, r in enumerate(recs):
+        if ok_lines is not None and is_light(r) and n < len(raw_lines) and sha256_bytes(raw_lines[n].encode("utf-8")) not in ok_lines:
+            probs.append("確認の記録 %s(%s %s)は、AI のツールの実行中に現れたか Plugin の道具が書いていない行なので、判断として数えない"
+                         % (r.get("id"), r.get("kind"), r.get("subject")))
+            continue
         ok, why = verify_record(r, trusted)
         if not ok:
             probs.append("署名記録 %s(%s %s)を検証できない: %s" % (r.get("id"), r.get("kind"), r.get("subject"), why))

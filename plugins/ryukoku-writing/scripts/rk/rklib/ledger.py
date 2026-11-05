@@ -55,6 +55,15 @@ def write(path, rows, fields):
         for r in rows:
             w.writerow({k: r.get(k, "") for k in fields})
     os.replace(tmp, path)
+    _note(path)
+
+
+def _note(path):
+    """Note the content the plugin's code wrote (msguard: a change during an AI tool call to a ledger file is
+    explained only by such a content)."""
+    from .common import note_written_file
+    proj = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+    note_written_file(proj, os.path.relpath(os.path.abspath(path), proj).replace(os.sep, "/"))
 
 
 IDENTITY_REL = os.path.join("sources", "identity.json")
@@ -93,6 +102,7 @@ def record_identity(proj, rows, results):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cur, f, ensure_ascii=False, indent=1, sort_keys=True)
         os.replace(tmp, p)
+        _note(p)
 
 
 def source_subject(row):
@@ -122,8 +132,12 @@ def add_source(proj, **kw):
         if k in REGISTER and not k.startswith("human_") and not k.startswith("machine_"):
             row[k] = (v or "").strip()
     row["id"] = row["id"] or _next(rows, "id", "S")
-    if any(r["id"] == row["id"] for r in rows):
-        raise RkError("id %s は既にある" % row["id"])
+    taken = {x for r in rows for x in ((r.get("id") or "").strip(), (r.get("citekey") or "").strip()) if x}
+    if row["id"] in taken:
+        raise RkError("id %s は既にある(台帳の id か citekey) / id %s is already taken" % (row["id"], row["id"]))
+    if row.get("citekey") and row["citekey"] in taken:
+        raise RkError("citekey %s は既にある(台帳の id か citekey)。一つのキーは一つの文献だけを指す / citekey %s is already taken"
+                      % (row["citekey"], row["citekey"]))
     row["machine_status"] = "CANDIDATE"
     row["machine_note"] = "未検査(rk.py refcheck check で確認する)"
     rows.append(row)
@@ -145,3 +159,14 @@ def add_claim(proj, claim, source_id, locator="", used_in=""):
     rows.append(row)
     write(cl, rows, CLAIMS)
     return row
+
+
+def duplicate_keys(rows):
+    """Keys (id or citekey) that name more than one ledger row."""
+    seen, dup = {}, set()
+    for r in rows:
+        for k in {(r.get("id") or "").strip(), (r.get("citekey") or "").strip()} - {""}:
+            if k in seen and seen[k] is not r:
+                dup.add(k)
+            seen.setdefault(k, r)
+    return sorted(dup)

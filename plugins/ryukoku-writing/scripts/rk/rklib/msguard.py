@@ -18,6 +18,7 @@ Watched
   manuscript/**                       content (shadow copies keep the state at the start of the window) -> provenance
   tools/**, thinking/**, disclosure/**, .github/**, .githooks/**, rk, rk.cmd, rk.ps1
   .ryukoku/config.yml, signers.json, style.yml, research/questions.md
+  sources/register.csv, claims.csv, identity.json, review/annotations.json (a content the plugin's code wrote is no detection)
   .claude/settings.json, .claude/settings.local.json (project) and ~/.claude/settings.json, settings.local.json
   ~/.ryukoku-writing/plugin-root (where ./rk finds the plugin) and the per-user trust copy of the signers
   sources/references.json             the author and year of works already listed (new works may be added)
@@ -53,7 +54,7 @@ import shutil
 import time
 
 from . import ailog, execgate, provenance, sign, style, subjects, trust
-from .common import (ExclusiveLock, load_config, manuscript_files, register_project, rel, sha256_bytes, sha256_file, state_dir,
+from .common import (ExclusiveLock, RkError, note_written, written_file_hashes, written_hashes, load_config, manuscript_files, register_project, rel, sha256_bytes, sha256_file, state_dir,
                      state_home, trust_path)
 
 MAX_FILE = 20 * 1024 * 1024
@@ -63,7 +64,11 @@ MAX_FILE = 20 * 1024 * 1024
 WINDOW_STALE = 6 * 3600
 TREES = ("tools", "thinking", "disclosure", ".github", ".githooks", "pandoc")
 FILES = (".ryukoku/config.yml", ".ryukoku/signers.json", ".ryukoku/style.yml", "research/questions.md",
-         "rk", "rk.cmd", "rk.ps1", ".claude/settings.json", ".claude/settings.local.json")
+         "rk", "rk.cmd", "rk.ps1", ".claude/settings.json", ".claude/settings.local.json",
+         "sources/register.csv", "sources/claims.csv", "sources/identity.json", "review/annotations.json")
+# files the plugin's own code rewrites as a whole (ledger.write, record_identity, the annotation store): a change
+# during an AI tool call is explained only when the file now has a content the plugin's code wrote (note_written_file)
+PLUGIN_REWRITTEN = ("sources/register.csv", "sources/claims.csv", "sources/identity.json", "review/annotations.json")
 APPEND_ONLY = ("research/search-log.jsonl", "review/annotations-log.jsonl", ".ryukoku/provenance.jsonl")
 SKIP_SCAN = {".git", "node_modules", "__pycache__", ".venv", "venv", ".rk-base"}
 
@@ -199,6 +204,44 @@ def _append_state(proj):
     return out
 
 
+def _absorb_outside(proj, old):
+    """No AI tool window is open: the lines appended to the record files since the last window closed were written
+    outside any AI tool call (the student's commands, a git pull). Note them as trusted (common.note_written), as the
+    plugin's own code notes what it writes. A line that appeared during a window is never noted, so it never counts
+    as a decision (sign.valid_index) and it is reported as a detection. Without any earlier state on this computer,
+    every existing line is taken as written outside a window."""
+    app = (old or {}).get("append") or {}
+    for r in (sign.SIGNOFFS_REL, ailog.LOG_REL) + APPEND_ONLY:
+        key = r.replace(os.sep, "/")
+        p = os.path.join(proj, r)
+        n0 = int((app.get(key) or [0, ""])[0] or 0) if old else 0
+        if old and app.get(key) and _prefix_hash(p, n0) != (app.get(key) or [0, ""])[1]:
+            continue  # not an append: nothing is trusted (the detection reports it)
+        try:
+            with open(p, "rb") as f:
+                f.seek(n0)
+                data = f.read()
+        except OSError:
+            continue
+        lines = [x for x in data.decode("utf-8", "replace").split("\n") if x.strip()]
+        if lines:
+            known = written_hashes(proj, r)
+            new = [x for x in lines if sha256_bytes(x.rstrip("\r").encode("utf-8")) not in known]
+            if new:
+                note_written(proj, r, new)
+
+
+def absorb_outside(proj):
+    """For rk check: when no window is open, note the lines appended since the last window (see _absorb_outside)."""
+    st = state_dir(proj)
+    try:
+        with _lock(st):
+            if not _windows(st):
+                _absorb_outside(proj, _load(os.path.join(st, "baseline.json"), None))
+    except RkError:
+        pass
+
+
 def snapshot(proj, st, old=None):
     cur = manuscript_map(proj)
     _sync_shadow(proj, st, cur, (old or {}).get("manuscript", {}), "shadow")
@@ -257,10 +300,35 @@ def _witness_dir():
     return os.path.join(d, "witness") if d else None
 
 
+LOCK_TIMEOUT = 8.0   # well inside the hooks' 20 s timeout
+LOCKFAIL = "lock-failed"
+
+
 def _lock(st):
     """One lock for every read-modify-write of the window store (open.json, windows/, baseline.json): parallel tool
     calls run their hooks at the same time, and an unlocked update loses windows."""
-    return ExclusiveLock(os.path.join(st, "windows.lock"))
+    return ExclusiveLock(os.path.join(st, "windows.lock"), timeout=LOCK_TIMEOUT)
+
+
+def _mark_lockfail(st):
+    """The window store could not be locked: no window exists for this call. A marker makes the next successful
+    window record what changed meanwhile as uncertain (the AI's side), never as the student's."""
+    try:
+        with open(os.path.join(st, LOCKFAIL), "a", encoding="utf-8") as f:
+            f.write("%f\n" % time.time())
+    except OSError:
+        pass
+
+
+def _take_lockfail(st):
+    p = os.path.join(st, LOCKFAIL)
+    if os.path.exists(p):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+        return True
+    return False
 
 
 def _leftover_windows(st, known):
@@ -290,8 +358,12 @@ def pre(proj, tool_use_id="", mode="run"):
     """Open a window (it stays open until its PostToolUse, or until the turn ends)."""
     register_project(proj)
     st = state_dir(proj)
-    with _lock(st):
-        return _pre(proj, st, tool_use_id, mode)
+    try:
+        with _lock(st):
+            return _pre(proj, st, tool_use_id, mode)
+    except RkError:
+        _mark_lockfail(st)
+        return {"ok": False, "lockfail": True}
 
 
 def _pre(proj, st, tool_use_id, mode):
@@ -308,6 +380,10 @@ def _pre(proj, st, tool_use_id, mode):
     # PreToolUse can come before this one's PostToolUse). Declined calls are closed at the end of the turn (turn_end)
     old = _load(os.path.join(st, "baseline.json"), None)
     leftovers = _leftover_windows(st, w) if not w else []
+    if _take_lockfail(st):
+        leftovers = leftovers + ["(lock-failed)"]
+    if not w:
+        _absorb_outside(proj, old)
     if not w or old is None or "append" not in old:
         if not w:
             try:
@@ -344,7 +420,7 @@ def turn_end(proj):
 
 def _turn_end(proj, st):
     raw = _load(os.path.join(st, "open.json"), {})
-    if not raw and not _leftover_windows(st, {}):
+    if not raw and not _leftover_windows(st, {}) and not _take_lockfail(st):
         return {"closed": 0}
     left = _leftover_windows(st, raw)
     for k in list(raw) + left:
@@ -398,6 +474,9 @@ def _explained_manuscript(r_after, path, good):
 
 
 def _explained_watched(proj, st, key, good):
+    if key in PLUGIN_REWRITTEN:
+        cur = _sha_or_empty(os.path.join(proj, key))
+        return bool(cur) and cur in written_file_hashes(proj, key)
     if not good:
         return False
     if key == ".ryukoku/style.yml":
@@ -433,8 +512,12 @@ def _already_logged(proj, since, path, after):
 
 def post(proj, tool="", summary="", tool_use_id="", command="", file_path=""):
     st = state_dir(proj)
-    with _lock(st):
-        return _post(proj, st, tool, summary, tool_use_id, command, file_path)
+    try:
+        with _lock(st):
+            return _post(proj, st, tool, summary, tool_use_id, command, file_path)
+    except RkError:
+        _mark_lockfail(st)
+        return {"entries": [], "manuscript_changed": [], "other_changed": [], "lockfail": True}
 
 
 def _post(proj, st, tool, summary, tool_use_id, command, file_path):
@@ -636,27 +719,20 @@ def pending(proj, idx):
     return out
 
 
-def config_detections_open(proj):
-    """Ids of detections that name .ryukoku/config.yml and have no current decision by the student (a light
-    'change' confirmation). Cheap: only light records are checked, no signature work (decisions on detections are
-    light confirmations). Used by common.config_problems: until the student decides, the settings are unreadable."""
-    want = []
-    for s in subjects.changes(proj):
-        e = s.content or {}
-        names = [str(x) for x in (e.get("parts") or []) + (e.get("files") or [])] + [str(e.get("path") or "")]
-        if any(".ryukoku/config.yml" in x for x in names):
-            want.append(s)
-    if not want:
+def open_detections(proj):
+    """Ids of detections without a current decision by the student. Decisions are light confirmations; only those
+    that count under sign.valid_index (written by the plugin's student-only paths or appended outside any AI tool
+    call) are taken. Used by common.config_problems: while any detection is undecided, the settings are not trusted
+    (manuscript writes are denied), because the detection may be a changed setting or a forged record."""
+    subs = subjects.changes(proj)
+    if not subs:
         return []
-    by = {}
-    try:
-        recs = sign.read_signoffs(proj)
-    except Exception:  # noqa: BLE001 - unreadable records: nothing is decided
-        recs = []
-    for r in recs:
-        if r.get("kind") == "change" and sign.is_light(r) and sign.verify_record(r, {})[0]:
-            by[r.get("subject")] = r
-    return [s.sid for s in want if not (by.get(s.sid) and by[s.sid].get("digest") == s.digest)]
+    idx, _b = sign.valid_index(proj, {})
+    return [x.sid for x in subs if not sign.current(idx, "change", x.sid, x.digest)]
+
+
+def config_detections_open(proj):
+    return open_detections(proj)
 
 
 def active(proj):

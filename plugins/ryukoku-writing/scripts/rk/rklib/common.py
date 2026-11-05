@@ -109,13 +109,13 @@ def config_problems(proj):
                    "the ai_policy line %r is not of the form 'ai_policy: allowed' (one of the four lower-case values, nothing else)" % (v, v))
     try:
         from . import msguard
-        ids = msguard.config_detections_open(proj)
+        ids = msguard.open_detections(proj)
     except Exception:  # noqa: BLE001 - the check itself must not open the gate
         ids = []
     if ids:
-        out.append("AI のツールの実行中に .ryukoku/config.yml が変わった(検知 %s)。学生が ./rk changes で判断するまで、設定は信用しない / "
-                   ".ryukoku/config.yml changed during an AI tool call (detection %s); the settings are not trusted until you decide with ./rk changes"
-                   % (", ".join(ids[:3]), ", ".join(ids[:3])))
+        out.append("AI のツールの実行中に守られた場所(設定・記録・台帳・道具など)が変わった検知 %s が未判断。学生が ./rk changes で判断するまで、設定は信用しない / "
+                   "a detection of a change to a protected place (settings, records, ledger, tools) during an AI tool call is undecided (%s); "
+                   "the settings are not trusted until you decide with ./rk changes" % (", ".join(ids[:3]), ", ".join(ids[:3])))
     return out
 
 
@@ -222,6 +222,25 @@ def note_written(proj, relp, lines):
                 f.write(sha256_bytes(ln.rstrip("\r\n").encode("utf-8")) + "\n")
     except OSError:
         pass
+
+
+def note_written_file(proj, relp):
+    """Remember the content hash of a whole file the plugin's own code just rewrote (the ledgers, the identity
+    records, the annotation store): msguard explains a change during an AI tool call only when the file now has a
+    content the plugin's code wrote (a `rk.py ledger` / `refcheck` / `annot` run), not one printf or an editor left."""
+    try:
+        p = os.path.join(proj, relp)
+        h = sha256_file(p)
+        q = _written_path(proj, relp + ".files")
+        os.makedirs(os.path.dirname(q), exist_ok=True)
+        with open(q, "a", encoding="utf-8") as f:
+            f.write(h + "\n")
+    except OSError:
+        pass
+
+
+def written_file_hashes(proj, relp):
+    return written_hashes(proj, relp + ".files")
 
 
 def written_hashes(proj, relp):

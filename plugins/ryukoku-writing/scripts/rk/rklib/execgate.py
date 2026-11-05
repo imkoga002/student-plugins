@@ -218,6 +218,13 @@ def lex(cmd):
             end()
             i += 1
             continue
+        if c == "\n":
+            end()
+            # a newline after && || | |& continues the list (bash reads the next line as the rest of it)
+            if not (toks and toks[-1][0] == "op" and toks[-1][1] in ("&&", "||", "|", "|&")):
+                toks.append(("op", ";"))
+            i += 1
+            continue
         if c == "\n" or c == ";":
             end()
             if cmd.startswith(";;", i):
@@ -331,19 +338,23 @@ def _manifest(plugin_root):
     return out
 
 
-def cdpath_possible():
-    """CDPATH may be set in the shell the AI's commands run in: in this environment, or in a shell startup file the
-    Bash tool's shell may read (the hook cannot see that shell's variables). Then a relative cd may go elsewhere."""
-    if os.environ.get("CDPATH"):
+LAUNCHERS = {"env", "command", "builtin", "exec", "xargs", "sudo", "nohup", "time", "nice", "eval"}
+
+
+def could_change_dir(word, at_command=True):
+    """WORD (text, dynamic, globbed) is or could become cd / pushd / popd: the name itself anywhere, or, where a
+    command name stands (the first word, or after env / command / xargs / ...), a variable or a glob that matches
+    one of them."""
+    text, dyn, glob = word
+    if text in DIR_CMDS:
         return True
-    home = os.path.expanduser("~")
-    for fn in (".bashrc", ".bash_profile", ".bash_login", ".profile", ".zshrc", ".zshenv", ".zprofile", ".kshrc", ".envrc"):
-        try:
-            with open(os.path.join(home, fn), encoding="utf-8", errors="replace") as f:
-                if "CDPATH" in f.read(200000):
-                    return True
-        except OSError:
-            pass
+    if not at_command:
+        return False
+    if dyn:
+        return True
+    if glob:
+        import fnmatch
+        return any(fnmatch.fnmatchcase(n, text) for n in DIR_CMDS)
     return False
 
 
@@ -354,9 +365,6 @@ class Scan(object):
         self.proj = os.path.realpath(proj) if proj else ""
         self.found = []
         self.cwd_unknown = False
-        self.dirstack = []
-        self.dir_certain = True
-        self.cdpath = cdpath_possible()
         self._tools_ok = None
         self.ai = ai_files()
         self.ai_shas = {v.get("sha") for v in self.ai.values() if isinstance(v, dict) and v.get("sha")}
@@ -381,8 +389,7 @@ class Scan(object):
         rel_like = not (text.startswith("/") or text.startswith("~") or re.match(r"^[A-Za-z]:[\\/]", text))
         if dyn or (rel_like and self.cwd_unknown):
             self.add("unknown_target", "%s %s" % (what, text))
-            base = os.path.basename(text.replace("\\", "/").rstrip("/")).lower()
-            if base in paths.PROTECTED_NAMES or not dyn and glob:
+            if paths.protected_name(text) or not dyn and glob:
                 self.add("protected_write", "unknown\t%s" % text)
             return "unknown"
         p = self._resolve(text, glob, cwd)
@@ -443,8 +450,6 @@ class Scan(object):
                         self.add("ai_file", real)
 
     def command(self, cmd):
-        if re.search(r"CDPATH", cmd or ""):
-            self.cdpath = True
         try:
             cmds = split_commands(lex(cmd))
         except Unparsed as e:
@@ -453,28 +458,22 @@ class Scan(object):
             # its target is unknown (denied under prohibited / unreadable settings, asked otherwise)
             if re.search(r"(^|[^0-9&<>])>(?!\s*/dev/null)|(^|[\s;&|(])(%s)(\s|$)" % "|".join(sorted(WRITE_CMDS | INPLACE_CMDS)), cmd or ""):
                 self.add("unknown_target", "(%s)" % str(e))
+                for w in re.findall(r"[^\s'\"<>|;&()`$]+", cmd or ""):
+                    if paths.protected_name(w):
+                        self.add("protected_write", "unknown\t%s" % w)
             # still name AI-written files that appear in it
             self.note_ai_files([(w, False, False) for w in re.findall(r"[^\s'\"<>|;&()`$]+", cmd)], self.cwd)
             return
-        cwd = self.cwd
-        # A directory change is followed only where bash certainly runs it in this shell: a command that starts a
-        # statement (after ";", a newline, "&" or the start) or continues an "&&" chain from there, is not part of a
-        # pipeline and is not sent to the background. A cd after "||", in a pipeline, in the background, after a
-        # control keyword (if/then/while/...), or as an argument (env cd, command cd, xargs cd) makes the directory
-        # unknown for the rest of the command: every later relative write target is then unknown.
-        keyworded = any(w and w[0][0] in KEYWORDS for w, _r, _s in cmds)
-        chain_ok = True
-        for k, (words, reds, sep) in enumerate(cmds):
-            nxt = cmds[k + 1][2] if k + 1 < len(cmds) else ""
-            if sep in ("", ";", "&"):
-                chain_ok = True
-            elif sep != "&&":
-                chain_ok = False      # "||", "|", "|&"
-            certain = chain_ok and not keyworded and nxt not in ("|", "|&", "&") and sep not in ("|", "|&")
-            self.dir_certain = certain
-            cwd = self.simple(words, reds, cwd)
-            if any(w[0] in DIR_CMDS for w in words[1:]):
-                self.cwd_unknown = True
+        # The directory is never followed. If the command contains any directory change anywhere (cd, pushd, popd, or
+        # a word that could become one after expansion: a variable or a glob that matches one of those names), every
+        # relative write target in the whole command is unknown; otherwise relative targets resolve against the tool's
+        # working directory. (Following cd failed three times: an && chain whose earlier command fails, a newline after
+        # && / || / |, a cd behind ||. Simpler and stricter is the rule.)
+        if any(could_change_dir(w, k == 0 or words[k - 1][0] in LAUNCHERS)
+               for words, _r, _s in cmds for k, w in enumerate(words)):
+            self.cwd_unknown = True
+        for words, reds, sep in cmds:
+            self.simple(words, reds, self.cwd)
 
     def _redirects(self, reds, cwd):
         for op, (text, dyn, glob) in reds:
@@ -535,10 +534,8 @@ class Scan(object):
             self.add("ask", "%s %s(--version 以外の起動は外部のプログラムを動かしうる)" % (base, " ".join(args[:3])))
             return cwd
         if base in DIR_CMDS:
-            if not self.dir_certain:
-                self.cwd_unknown = True
-                return cwd
-            return self.change_dir(base, words[1:], cwd)
+            self.cwd_unknown = True
+            return cwd
         if base in PY_NAMES:
             return self.python(name, args, cwd)
         if base in SH_NAMES:
@@ -559,52 +556,6 @@ class Scan(object):
             return cwd
         self.add("ask", base)
         return cwd
-
-    def change_dir(self, base, words, cwd):
-        """cd / pushd / popd as bash runs them. The new directory is followed when it is certain; otherwise every
-        later relative write target is unknown (cwd_unknown): a variable or an unresolvable glob, `cd -`, popd, a
-        directory-stack argument (+N/-N), an unknown option, and any relative cd while CDPATH may be set (in the
-        environment, or assigned or exported by the command), because bash then may pick a directory elsewhere."""
-        args = list(words)
-        while args and args[0][0] in ("-L", "-P", "-e", "-@") and not args[0][1] and not args[0][2]:
-            args = args[1:]
-        if args and args[0][0] == "--":
-            args = args[1:]
-        if base == "popd":
-            if self.dirstack and not args:
-                return self.dirstack.pop()
-            self.cwd_unknown = True
-            return cwd
-        if not args:
-            if base == "pushd":
-                self.cwd_unknown = True  # swaps the top two entries
-            return cwd if base == "pushd" else os.path.expanduser("~")
-        text, dyn, glob = args[0]
-        if text == "-" or re.match(r"^[+-]\d*$", text) or text.startswith("-") or len(args) > 1:
-            self.cwd_unknown = True
-            return cwd
-        if dyn:
-            self.cwd_unknown = True  # cd "$D": every later relative write target is unknown
-            return cwd
-        t = text.replace("\\", "/")
-        if self.cdpath and not (t.startswith("/") or t.startswith("./") or t.startswith("../") or t in (".", "..")
-                                or t.startswith("~") or re.match(r"^[A-Za-z]:/", t)):
-            self.cwd_unknown = True
-            return cwd
-        if glob:
-            hits = [h for h in _glob.glob(self._abs(text, cwd)) if os.path.isdir(h)]
-            if len(hits) != 1:
-                self.cwd_unknown = True
-                return cwd
-            new = os.path.normpath(hits[0])
-        else:
-            new = os.path.normpath(os.path.join(cwd, os.path.expanduser(t)))
-        if not os.path.isdir(new):
-            self.cwd_unknown = True  # bash's cd fails there; what runs next, and where, is not certain
-            return cwd
-        if base == "pushd":
-            self.dirstack.append(cwd)
-        return new
 
     def read_only_bad(self, base, args, words, cwd="."):
         if base == "sed":  # only `sed -n [N,Mp|Np] <file>` reads; e/w/s commands or a program run code

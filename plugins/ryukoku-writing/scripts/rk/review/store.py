@@ -70,6 +70,8 @@ class Store:
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.write("\n")
         os.replace(tmp, self.path)
+        from rklib.common import note_written_file
+        note_written_file(os.path.dirname(os.path.dirname(os.path.abspath(self.path))), os.path.join("review", "annotations.json"))
 
     def _log(self, op, aid, **kw):
         rec = {"op": op, "id": aid, "at": now()}

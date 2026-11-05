@@ -218,6 +218,9 @@ def check_ledger_shape(proj, rep):
                 head = f.readline().strip().split(",")
             if head != fields:
                 rep.err(rep.t("%s の見出し行が想定と違う: %s", "%s: unexpected header; expected %s") % (rel(proj, path), ",".join(fields)))
+    for k in ledger.duplicate_keys(ledger.read(reg, ledger.REGISTER)):
+        rep.err(rep.t("台帳のキー %s が複数の行を指す(id か citekey の重複)。一つのキーは一つの文献だけを指す",
+                      "ledger key %s names more than one row (a duplicated id or citekey); one key names one work") % k)
     for s in ledger.read(reg, ledger.REGISTER):
         ms = s.get("machine_status", "")
         if ms and ms not in ledger.MACHINE_STATUSES:
@@ -324,6 +327,14 @@ def check_numbers(proj, rep, stage="draft"):
     drafting, an error at submission."""
     n = 0
     say = rep.err if stage == "submit" else rep.warn
+    if os.path.exists(os.path.join(proj, "data", "numeric-claims.csv")):
+        try:
+            nprobs = datacheck.check_numbers(os.path.join(proj, "data"))
+        except Exception as ex:  # noqa: BLE001 - a malformed file is a problem to report, not a traceback
+            nprobs = ["numeric-claims.csv を読めない(%s)" % type(ex).__name__]
+        for x in nprobs[:8]:
+            say(rep.t("data/numeric-claims.csv: %s(確かめられない行は数字の出典にならない)",
+                      "data/numeric-claims.csv: %s (a row that does not check out is not a source for a figure)") % x)
     marks = verification.figure_marks(proj)
     for p in manuscript_files(proj):
         relp = rel(proj, p)
@@ -448,6 +459,8 @@ def check_ci_extras(proj, rep, base_ref):
 
 def run(proj, stage="draft", ci=False, base_ref=None):
     rep = Report(feedback_lang(proj))
+    if not ci:
+        msguard.absorb_outside(proj)   # lines appended outside any AI tool call count as written there
     trusted, tprobs, tnotes = trust.trusted_signers(proj, ci=ci, base_ref=base_ref, lang=rep.lang)
     for p in tprobs:
         rep.err(p)

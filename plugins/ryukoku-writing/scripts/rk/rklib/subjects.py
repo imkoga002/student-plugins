@@ -76,13 +76,29 @@ def source_identity(row):
     return {k: (row.get(k) or "").strip() for k in ledger.SOURCE_KEYS}
 
 
+def rendered_entry(proj, row, ident=None):
+    """The bibliography entry the export would print for ROW (citations.csl_item with the identity check's registry
+    metadata): the student's VERIFIED covers exactly this, so a change to any printed field invalidates it."""
+    from . import citations
+    ident = ledger.read_identity(proj) if ident is None else ident
+    meta, why = citations._identity_meta(proj, row, ident)
+    key = (row.get("citekey") or row.get("id") or "").strip()
+    item, _missing = citations.csl_item(key, row, meta)
+    if why:
+        item["_identity"] = why
+    return item
+
+
 def sources(proj):
     out = []
+    ident_all = ledger.read_identity(proj)
     for r in ledger.read(ledger.paths(proj)[0], ledger.REGISTER):
         ident = source_identity(r)
+        rendered = rendered_entry(proj, r, ident_all)
         c = dict(ident, machine_status=r.get("machine_status", ""), machine_note=r.get("machine_note", ""),
-                 container=r.get("container", ""), medium=r.get("medium", ""), human_note=r.get("human_note", ""))
-        out.append(Subject("source", ident["id"], _d(dict(kind="source", **ident)),
+                 container=r.get("container", ""), medium=r.get("medium", ""), human_note=r.get("human_note", ""),
+                 rendered=rendered)
+        out.append(Subject("source", ident["id"], _d(dict(kind="source", rendered=rendered, **ident)),
                            "%s %s(%s)" % (ident["id"], ident["title"][:60], ident["year"]), c,
                            (r.get("human_status") or "").strip()))
     return out
@@ -247,12 +263,20 @@ def changes(proj):
     return out
 
 
+def _bibliography_digest(proj):
+    """Digest of every entry the export could print (all qualifying ledger rows, rendered)."""
+    from . import citations
+    items, bad = citations.csl_items(proj, set(), star=True)
+    return _d({"items": items, "bad": bad})
+
+
 def presubmit_subject(proj):
     def fh(relp):
         p = os.path.join(proj, relp)
         return sha256_file(p) if os.path.exists(p) else ""
     obj = {"kind": "presubmit", "manuscript": {rel(proj, p): sha256_file(p) for p in manuscript_files(proj)},
            "register": fh(os.path.join("sources", "register.csv")), "claims": fh(os.path.join("sources", "claims.csv")),
+           "identity": fh(ledger.IDENTITY_REL), "bibliography": _bibliography_digest(proj),
            "style": fh(style.APPROVED_REL), "checklist": list(CHECKLIST_IDS),
            "cards": {rel(proj, p): sha256_file(p) for p in claimcards.card_files(proj)},
            "provenance": provenance.digest(proj), "disclosure": disclosure_statements(proj)}

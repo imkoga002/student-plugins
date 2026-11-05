@@ -95,7 +95,10 @@ def main(argv):
         return 0
     from rklib import ailog, msguard
     if cmd == "pre":
-        msguard.pre(proj, argv[2] if len(argv) > 2 else "", argv[3] if len(argv) > 3 else "run")
+        r = msguard.pre(proj, argv[2] if len(argv) > 2 else "", argv[3] if len(argv) > 3 else "run")
+        if r.get("lockfail"):
+            print("lockfail")
+            return 3
     elif cmd == "post":
         a = argv + [""] * 7
         print(json.dumps(with_checks(proj, msguard.post(proj, a[2], a[4], a[3], a[5], a[6])), ensure_ascii=False))
@@ -150,34 +153,43 @@ def main(argv):
     return 0
 
 
-TEXT_KEYS = {"content", "text", "body", "old_string", "new_string", "new_str", "old_str", "prompt", "description",
-             "query", "url", "pattern", "command", "new_source", "message", "comment", "title", "edits", "todos",
-             "insert_text", "replacement", "search", "regex"}
+# leaf strings under these keys carry text, not a path (everything else is looked at, nested objects and arrays included)
+BODY_KEYS = {"content", "old_string", "new_string", "oldtext", "newtext", "old_str", "new_str", "text", "body", "new_source",
+             "prompt", "description", "message", "command", "query", "insert_text"}
 PATH_KEY_HINTS = ("path", "file", "dir", "folder", "dest", "target", "src", "source", "output", "out", "name", "root",
-                  "cwd", "location", "notebook")
+                  "cwd", "location", "notebook", "to", "from", "glob", "pattern", "title", "uri", "url", "arg")
 
 
 def tool_paths(node, key="", depth=0):
-    """Strings in NODE that may name a file: under a key that hints at a path, or that contain a path separator or
-    look like a file name with an extension. Text-carrying keys are skipped (their content is checked elsewhere)."""
+    """Strings in NODE that may name a file: every leaf string except those directly under a body key (BODY_KEYS),
+    when it is shaped like a path (absolute, even with spaces; a file: URL; a separator; a file name with an
+    extension) or sits under a key that hints at a path."""
     out = []
-    if depth > 12:
+    if depth > 16:
         return out
     if isinstance(node, dict):
         for k, v in node.items():
-            if str(k).lower() in TEXT_KEYS:
-                continue
             out += tool_paths(v, str(k), depth + 1)
     elif isinstance(node, list):
         for v in node:
             out += tool_paths(v, key, depth + 1)
     elif isinstance(node, str):
+        if key.lower() in BODY_KEYS:
+            return out
         v = node.strip()
         if not v or "\n" in v or len(v) > 4096:
             return out
+        if v.lower().startswith("file://"):
+            from urllib.parse import unquote, urlparse
+            v = unquote(urlparse(v).path) or v
+        absolute = v.startswith(("/", "~", "\\")) or bool(re.match(r"^[A-Za-z]:[\\/]", v))
         hinted = any(h in key.lower() for h in PATH_KEY_HINTS)
-        looks = ("/" in v or "\\" in v or v.startswith("~")) and " " not in v.strip("/") or bool(re.match(r"^[^\s/\\]+\.[A-Za-z0-9]{1,6}$", v))
-        if (hinted and not re.match(r"^[a-z][a-z0-9+.-]*://", v)) or looks:
+        looks = absolute or (("/" in v or "\\" in v) and " " not in v) or bool(re.match(r"^[^\s/\\]+\.[A-Za-z0-9]{1,6}$", v))
+        if re.match(r"^[a-z][a-z0-9+.-]*://", v):
+            return out
+        if v.startswith("-") and not absolute:
+            return out          # an option, not a path
+        if looks or (hinted and " " not in v and len(v) < 512):
             out.append(v)
     return out
 

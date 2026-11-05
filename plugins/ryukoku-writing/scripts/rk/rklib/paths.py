@@ -87,3 +87,22 @@ def classify_abs(path, proj):
         if c in PROTECTED:
             return c
     return next((c for c in out if c != "other"), "other")
+
+
+# directory names that are protected wherever they appear in a path whose base directory is unknown
+PROTECTED_DIRS = {"manuscript", ".ryukoku", "thinking", "disclosure", "tools", "pandoc", ".github", ".githooks", ".git",
+                  ".claude", ".ryukoku-writing", "raw"}
+PROTECTED_NAME_GLOBS = ("defaults-*.yaml", "*.csl", "check.yml", "build.yml", "*.latex", "reference.docx")
+
+
+def protected_name(path):
+    """A path whose directory is unknown (a cd the scanner does not follow) names a protected place: its base name is
+    a record, settings or tool file name, or one of its components is a protected directory name."""
+    p = norm(path).rstrip("/")
+    parts = [x for x in p.split("/") if x and x != "."]
+    if not parts:
+        return False
+    base = parts[-1]
+    if base in PROTECTED_NAMES or any(fnmatch.fnmatchcase(base, g) for g in PROTECTED_NAME_GLOBS):
+        return True
+    return any(x in PROTECTED_DIRS for x in parts)
