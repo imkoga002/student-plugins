@@ -1,0 +1,20 @@
+# The human-only subcommands of rk.py / ./rk: one name per line. The single source for rk.py (HUMAN),
+# rklib/execgate.py (the parsed-command check) and scripts/hooks/pre-guard.sh (the string check used when Python is
+# missing). The student runs them at their own terminal; the AI never does.
+setup
+confirm
+apply
+verify
+style
+resolve
+signoff
+disclose
+changes
+optout
+import-docx
+sign
+trust
+update-tools
+notebook
+unattributed
+review

@@ -10,7 +10,7 @@ inside the project). Appends take a lock.
 import json
 import os
 
-from .common import FileLock, RkError, now_iso, sha256_bytes, state_dir, today, tr
+from .common import FileLock, RkError, note_written, now_iso, sha256_bytes, state_dir, today, tr
 
 LOG_REL = os.path.join(".ryukoku", "ai-use-log.jsonl")
 GENESIS = "GENESIS"
@@ -54,6 +54,7 @@ def append(proj, obj):
         line = json.dumps(obj, ensure_ascii=False, sort_keys=True)
         with open(p, "a", encoding="utf-8", newline="") as f:
             f.write(line + "\n")
+        note_written(proj, LOG_REL, [line])
         try:
             n = sum(1 for x in open(p, encoding="utf-8") if x.strip())
             with open(_head_path(proj), "w", encoding="utf-8") as f:

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: verified-is-human
-description: VERIFIED を AI が付けない。学生の合言葉の署名で付けることを案内する(人間の判断は署名でだけ記録される)
+description: VERIFIED を AI が付けない。原典を読んだという宣言は学生の合言葉の署名で付けることを案内する(合言葉が要る二つの判断の一つ)
 tags: [ryukoku, human-review]
 context:
   scaffold_script: scaffold.sh

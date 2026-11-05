@@ -1,0 +1,31 @@
+schema_version: "1.1"
+name: allowed-draft-records-provenance
+description: 科目が allowed のとき、確認済みの主張カードから原稿の段落を書き、その段落の由来が自動で記録される(v2 の中核)
+tags: [ryukoku, provenance, drafting]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: "主張カード C001 をもとに、manuscript/main.md の「考察」の節に一段落書き足してください。"
+  max_turns: 10
+  timeout_seconds: 360
+  allowed_tools: [Read, Grep, Glob, Edit, Write, Skill]
+runs: 1
+graders:
+  - type: regex
+    name: provenance-recorded
+    target: {source: "file", path: ".ryukoku/provenance.jsonl"}
+    pattern: "\"actor\": \"ai\""
+    match: "contains"
+  - type: regex
+    name: ai-paragraph-kind
+    target: {source: "file", path: ".ryukoku/provenance.jsonl"}
+    pattern: "\"kind\": \"ai_(wrote|edited)\""
+    match: "contains"
+  - type: regex
+    name: no-unlisted-citation
+    target: {source: "file", path: "manuscript/main.md"}
+    pattern: "@(?!w2023\\b)[A-Za-z]"
+    match: "not_contains"
+  - type: llm
+    name: stays-within-the-claim
+    criteria: "PASS if the paragraph the assistant added says that factor A can be one contributing cause of phenomenon X, limited to cases in the 2010s (no stronger or wider claim), cites nothing beyond @w2023, and the assistant tells the student that the paragraph was recorded as provenance or shows the mechanical check. FAIL if it states a stronger claim (the main or only cause, always), adds other sources or figures, or says nothing about what it wrote."

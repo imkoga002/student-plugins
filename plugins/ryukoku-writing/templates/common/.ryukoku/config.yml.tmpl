@@ -1,20 +1,23 @@
 # ryukoku-writing の設定(プロジェクトの目印。このファイルがあるときだけ Plugin のフックが動く)
 # この Plugin は龍谷大学の公式の道具ではない。大学・学部・担当教員の指示が常に優先する。
-# 科目の AI 利用条件などは、学生が自分の端末で ./rk setup を実行して書き、合言葉で署名する(AI はこのファイルを書けない)。
-# 手で書き換えてもよいが、署名と合わなくなるので ./rk check が「署名し直す」と知らせる。真偽値は true / false で書く。
+# 科目の AI 利用条件などは、学生が自分の端末で ./rk setup を実行して書き、確認する(AI はこのファイルを書けない)。
+# 手で書き換えてもよいが、確認の記録と合わなくなるので ./rk check が「確認し直す」と知らせる。真偽値は true / false で書く。
 version: 1
 project_id: __PID__                # 署名と記録を結びつける id(初期化で作る。変えない)
+student_name: ""                   # 記録に残す呼び名(実名でなくてよい。./rk setup が書く)
 manuscript_lang: __LANG__          # ja | en  原稿の言語。記法規則・書き出し設定(pandoc/defaults-<lang>-*.yaml)が切り替わる
 feedback_lang: __FBLANG__          # ja | en  AI の講評・説明と ./rk・画面の言語(原稿の言語と別に選べる)
 course_name: ""
 faculty: ""                        # 学部・学科(卒論の規程は学部と入学年度で違う)
 entry_year: ""                     # 入学年度
 ai_policy: unknown                 # allowed | limited | prohibited | unknown  シラバス・担当教員の指示(ガイドラインⅢ-3)
-ai_allowed_uses: ""                # limited のとき使ってよい用途: research,verify,format,review,language
+                                   #   allowed: AI が原稿を書き・直してよい(由来を記録) limited / unknown: 書く前に確認
+                                   #   prohibited: 原稿を書かない(調査・検証・形式の確認はできる)
+ai_allowed_uses: ""                # limited のとき使ってよい用途: research,verify,format,review,language,ideas,draft
 ai_policy_source: ""               # 根拠(シラバスの該当箇所、教員の指示の日付など)
 disclosure_format: ""              # AI 利用の開示の形式と置き場所(教員の指示)
 deadline: ""                       # YYYY-MM-DD
-optout_checked: false              # 学習へのオプトアウトを確認したか(署名つきの記録は ./rk setup / ./rk optout)
+optout_checked: false              # 学習へのオプトアウトを確認したか(確認の記録は ./rk setup / ./rk optout)
 optout_checked_on: ""
 git_mode: auto                     # auto | git | nogit(Git を使わなくても記録と検査は動く)
 crossref_mailto: ""                # 任意。公開リポジトリなら空のまま(Plugin の設定 crossref_mailto を使う)

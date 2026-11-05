@@ -1,7 +1,8 @@
 // Headless-browser check of the evidence notebook (Playwright, Chromium). Called by tests/test_notebook.py:
 //   node tests/js/notebook.test.js <url> <passphrase>
 // It plays the student: open the proposals tab, confirm a decision cannot be chosen before "Show", show the diff,
-// choose "accept", add it to the list, sign with the passphrase once, and check the status line and the empty list.
+// choose "accept" and record it with one button (no passphrase); then open a source, choose VERIFIED, which goes to
+// the "to sign" list, sign it with the passphrase once, and check the status line and the empty list.
 "use strict";
 const { chromium } = require("playwright");
 const assert = require("assert");
@@ -20,7 +21,18 @@ const assert = require("assert");
   await item.locator("button.show").click();
   await item.locator(".diff .ins").first().waitFor();
   await item.locator("select.dec").selectOption("accepted");
+  assert.ok(/記録する|Record/.test(await item.locator("button.add").textContent()), "a light decision is recorded directly");
   await item.locator("button.add").click();
+  await page.waitForFunction(() => /記録した|Recorded/.test(document.getElementById("status").textContent), null, { timeout: 60000 });
+  assert.strictEqual(await page.locator("#signBtn").isDisabled(), true, "nothing waits for the passphrase");
+  // VERIFIED needs the passphrase: it goes to the list to sign
+  await page.click("#t-evidence");
+  const src = page.locator("#sources .item").first();
+  await src.waitFor();
+  await src.locator("button.show").click();
+  await src.locator("select.dec").selectOption("VERIFIED");
+  assert.ok(/署名する項目|items to sign/i.test(await src.locator("button.add").textContent()));
+  await src.locator("button.add").click();
   assert.strictEqual(await page.locator("#basketList li").count(), 1);
   await page.click("#signBtn");
   await page.fill("#pw", pass);

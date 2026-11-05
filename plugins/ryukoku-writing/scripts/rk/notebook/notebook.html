@@ -62,21 +62,24 @@ footer{padding:16px 16px 64px;font-size:12px;color:var(--mut);max-width:1500px;m
 <div class="layout">
 <main id="main" tabindex="-1">
   <section role="tabpanel" id="p-overview"><div class="panel"><h2 data-t="overviewH">いまの状態</h2><div id="overview"></div></div>
-    <div class="panel"><h2 data-t="howH">この画面の使い方</h2><p data-t="how1">各項目の「表示」で内容(差分・原典の情報・前回の署名からの差分)を確かめると、判断を選べるようになる。選んだ判断は右の「署名する項目」にたまる。</p>
-    <p data-t="how2">最後に「合言葉で署名」を押し、合言葉を一回入れると、選んだ項目がそれぞれの内容のハッシュつきで署名される。合言葉は保存されない。全部をまとめて採用するボタンはない(一件ずつ確かめるため)。</p>
-    <p data-t="how3">原稿や問いはここでは編集しない。自分のエディタで書く。</p></div></section>
+    <div class="panel"><h2 data-t="howH">この画面の使い方</h2><p data-t="how1">各項目の「表示」で内容(差分・原典の情報・主張カード・前回の確認からの差分)を確かめると、判断を選べるようになる。ほとんどの判断は「記録する」のボタン一つで、その内容のハッシュつきで記録される(合言葉は要らない)。</p>
+    <p data-t="how2">合言葉が要るのは二つだけ: VERIFIED(原典を読んだ)と提出前の最終確認。これらは右の「署名する項目」にたまり、「合言葉で署名」で一回入れるとまとめて署名される。合言葉は保存されない。全部をまとめて採用するボタンはない(一件ずつ確かめるため)。</p>
+    <p data-t="how3">原稿や問いはここでは編集しない。自分のエディタで書くか、科目が許せば AI に頼む(AI が書いた段落は由来の記録に残る)。</p></div>
+    <div class="panel"><h2 data-t="provH">原稿の由来(AI が書いた・直した段落)</h2><div id="prov"></div></div></section>
   <section role="tabpanel" id="p-research"><div class="panel"><h2 data-t="questionsH">自分の問い(research/questions.md)</h2><pre class="src" id="questions"></pre>
     <p class="hint" data-t="questionsHint">問いは自分の言葉で書く(AI は書けない)。検索は、ここにある問いの番号(Q1 など)に結びつけてだけ行われる。</p></div>
     <div class="panel"><h2 data-t="searchH">検索の記録(research/search-log.jsonl)</h2><div id="searchProblems" class="warn"></div><div style="overflow:auto"><table id="searchTable"></table></div></div>
     <div class="panel"><h2 data-t="biasH">偏りの点検(ガイドラインⅡ-2(2))</h2><div id="bias"></div></div>
     <div class="panel"><h2 data-t="thinkingH">思考の記録(thinking/log.md)</h2><pre class="src" id="thinking"></pre></div></section>
+  <section role="tabpanel" id="p-cards"><div class="panel"><h2 data-t="cardsH">主張カード(claims/)</h2>
+    <p class="hint" data-t="cardsHint">あなたの言葉を AI が聞き取って整理したもの。[ai_suggested] は AI が足した候補で、確認の対象に入らない。主張・範囲・あなたの言葉の原文が自分の考えと同じときだけ「これは自分の主張」を記録する。AI が原稿を書くときの材料は、確認したカードだけ。</p><div id="cards"></div></div></section>
   <section role="tabpanel" id="p-evidence"><div class="panel"><h2 data-t="sourcesH">文献(機械の確認 → 自分で原典を確かめる)</h2>
     <p class="hint" data-t="sourcesHint">「機械」は識別子と書誌の照合の結果。VERIFIED は自分が現物(原典)を確かめたときだけ選ぶ。</p><div id="sources"></div></div>
     <div class="panel"><h2 data-t="claimsH">主張と出典</h2><p class="hint" data-t="claimsHint">原典の該当箇所を読み、支えるなら VERIFIED。支えないなら CONTRADICTED にして、主張を原典に合わせて自分で直す(逆はしない)。</p><div id="claims"></div></div></section>
   <section role="tabpanel" id="p-proposals"><div class="panel"><h2 data-t="proposalsH">提案(表記・書式の統一)</h2><p class="hint" id="whyProposals"></p><div id="proposals"></div></div></section>
   <section role="tabpanel" id="p-review"><div class="panel"><h2 data-t="reviewH">原稿とコメント</h2>
     <label><span data-t="docLabel">原稿</span> <select id="docSel"></select></label>
-    <p class="hint" data-t="docHint">本文はここでは編集しない。範囲を選んで、下の欄からコメントを書ける(コメントの作成は署名不要。解決は署名が要る)。</p>
+    <p class="hint" data-t="docHint">本文はここでは編集しない。範囲を選んで、下の欄からコメントを書ける(コメントの作成も解決も合言葉は要らない)。</p>
     <div id="doc" role="document" tabindex="0"></div>
     <h3 data-t="newComment">選んだ範囲にコメント</h3>
     <div class="decide"><select id="cCode" aria-label="code"></select><select id="cSev" aria-label="severity"><option>推奨</option><option>必須</option></select>
@@ -84,12 +87,13 @@ footer{padding:16px 16px 64px;font-size:12px;color:var(--mut);max-width:1500px;m
     <textarea id="cText" aria-label="comment"></textarea><button id="cSave" type="button" data-t="saveComment">コメントを保存</button></div>
     <div class="panel"><h2 data-t="commentsH">コメント</h2><div id="comments"></div></div></section>
   <section role="tabpanel" id="p-rules"><div class="panel"><h2 data-t="rulesH">記法規則(承認したものだけ使う)</h2><p class="hint" data-t="rulesHint">根拠の資料(要項・シラバス・見本)の該当箇所と照らして決める。</p><div id="rules"></div></div></section>
-  <section role="tabpanel" id="p-changes"><div class="panel"><h2 data-t="changesH">AI のツール実行中に検知した変更</h2><p class="hint" data-t="changesHint">AI は原稿に書かない設計なので、ここに出るものは意図しない変更の可能性が高い。差分を見て、残す・自分の編集だった・戻すを選ぶ。決めるまで検査は通らない。</p><div id="changes"></div></div></section>
-  <section role="tabpanel" id="p-submit"><div class="panel"><h2 data-t="sectionsH">節の署名(前回の署名からの差分を読む)</h2><div id="sections"></div></div>
+  <section role="tabpanel" id="p-changes"><div class="panel"><h2 data-t="changesH">AI のツール実行中に検知した変更</h2><p class="hint" data-t="changesHint">道具・設定・人間の記録など、AI が書かない場所が AI のツール実行中に変わったもの(原稿への書き込みは由来の記録になり、ここには出ない)。差分を見て判断する。決めるまで検査は通らない。</p><div id="changes"></div></div></section>
+  <section role="tabpanel" id="p-submit"><div class="panel"><h2 data-t="factsH">開示の事実と開示文(最終確認の対象)</h2><pre class="src" id="facts"></pre><div id="statements"></div></div>
+    <div class="panel"><h2 data-t="sectionsH">節を読んだ確認(前回の確認からの差分を読む。任意)</h2><div id="sections"></div></div>
     <div class="panel"><h2 data-t="daysH">AI 利用の概要(開示の材料。自分の言葉で)</h2><div id="days"></div></div>
     <div class="panel"><h2 data-t="checklistH">提出前のチェックリスト</h2><div id="checklist"></div><div id="presubmit"></div></div></section>
 </main>
-<aside id="basket" aria-labelledby="basketH"><div class="panel"><h2 id="basketH" data-t="basketH">署名する項目</h2>
+<aside id="basket" aria-labelledby="basketH"><div class="panel"><h2 id="basketH" data-t="basketH">署名する項目(VERIFIED・最終確認)</h2>
   <ul id="basketList" aria-live="polite"></ul>
   <button id="signBtn" class="primary" type="button" disabled data-t="signBtn">合言葉で署名…</button>
   <p class="hint" data-t="basketHint">合言葉は一回だけ入れる。署名が終わると鍵は捨てられ、保存されない。</p></div></aside>
@@ -103,7 +107,7 @@ footer{padding:16px 16px 64px;font-size:12px;color:var(--mut);max-width:1500px;m
   <div class="decide"><button class="primary" id="dlgOk" value="ok" data-t="dlgOk">署名する</button><button id="dlgCancel" value="cancel" formnovalidate data-t="cancel">やめる</button></div>
 </form></dialog>
 <div id="status" role="status" aria-live="polite"></div>
-<footer data-t="footer">ryukoku-writing(非公式)。この画面は 127.0.0.1 だけで動き、外部に通信しない。人間の判断は、合言葉の署名でだけ記録される。</footer>
+<footer data-t="footer">ryukoku-writing(非公式)。この画面は 127.0.0.1 だけで動き、外部に通信しない。判断は内容のハッシュつきで記録され、VERIFIED と提出前の最終確認は合言葉で署名される。</footer>
 <script>
 "use strict";
 const BOOT = /*__BOOT__*/null;
@@ -111,25 +115,28 @@ const EN = BOOT && BOOT.lang === "en";
 const T = {
   title:["証拠ノート","Evidence notebook"], unofficial:["非公式。大学・教員の指示が優先する。","Unofficial; your university and instructor take precedence."],
   skip:["本文へ移動","Skip to content"], overviewH:["いまの状態","Status"], howH:["この画面の使い方","How this page works"],
-  how1:["各項目の「表示」で内容(差分・原典の情報・前回の署名からの差分)を確かめると、判断を選べるようになる。選んだ判断は右の「署名する項目」にたまる。","Open an item with \"Show\" to see its content (diff, source data, changes since your last signature); only then can you choose a decision. Chosen decisions collect in \"Items to sign\"."],
-  how2:["最後に「合言葉で署名」を押し、合言葉を一回入れると、選んだ項目がそれぞれの内容のハッシュつきで署名される。合言葉は保存されない。全部をまとめて採用するボタンはない(一件ずつ確かめるため)。","Then press \"Sign with passphrase\" and enter it once: each chosen item is signed with the hash of its content. The passphrase is not stored. There is no accept-all button: every item is checked one by one."],
-  how3:["原稿や問いはここでは編集しない。自分のエディタで書く。","You do not edit the manuscript or your questions here; write them in your own editor."],
+  how1:["各項目の「表示」で内容(差分・原典の情報・主張カード・前回の確認からの差分)を確かめると、判断を選べるようになる。ほとんどの判断は「記録する」のボタン一つで、その内容のハッシュつきで記録される(合言葉は要らない)。","Open an item with \"Show\" to see its content (diff, source data, claim card, changes since your last confirmation); only then can you choose a decision. Most decisions are recorded with one \"Record\" button, bound to the hash of the content (no passphrase)."],
+  how2:["合言葉が要るのは二つだけ: VERIFIED(原典を読んだ)と提出前の最終確認。これらは右の「署名する項目」にたまり、「合言葉で署名」で一回入れるとまとめて署名される。合言葉は保存されない。全部をまとめて採用するボタンはない(一件ずつ確かめるため)。","Only two decisions need the passphrase: VERIFIED (you read the original) and the final pre-submission confirmation. They collect in \"Items to sign\" and one passphrase entry signs them. The passphrase is not stored. There is no accept-all button: every item is checked one by one."],
+  how3:["原稿や問いはここでは編集しない。自分のエディタで書くか、科目が許せば AI に頼む(AI が書いた段落は由来の記録に残る)。","You do not edit the manuscript or your questions here; write in your editor, or ask the AI if the course allows it (what the AI writes is recorded as provenance)."],
+  provH:["原稿の由来(AI が書いた・直した段落)","Provenance (paragraphs the AI wrote or revised)"], cardsH:["主張カード(claims/)","Claim cards (claims/)"],
+  cardsHint:["あなたの言葉を AI が聞き取って整理したもの。[ai_suggested] は AI が足した候補で、確認の対象に入らない。主張・範囲・あなたの言葉の原文が自分の考えと同じときだけ「これは自分の主張」を記録する。AI が原稿を書くときの材料は、確認したカードだけ。","What the AI organised from your words. [ai_suggested] marks the AI's candidates, which are not part of what you confirm. Record \"this is my claim\" only if the claim, the scope and your own words say what you think. The AI drafts only from confirmed cards."],
+  factsH:["開示の事実と開示文(最終確認の対象)","Disclosure facts and statement (what the final confirmation covers)"], record:["記録する","Record"], recorded:["記録した: ","Recorded: "],
   questionsH:["自分の問い(research/questions.md)","Your questions (research/questions.md)"], questionsHint:["問いは自分の言葉で書く(AI は書けない)。検索は、ここにある問いの番号(Q1 など)に結びつけてだけ行われる。","You write the questions (the AI cannot). Searches run only for question ids listed here (Q1 ...)."],
   searchH:["検索の記録(research/search-log.jsonl)","Search log (research/search-log.jsonl)"], biasH:["偏りの点検(ガイドラインⅡ-2(2))","Bias check (guideline II-2(2))"], thinkingH:["思考の記録(thinking/log.md)","Thinking log (thinking/log.md)"],
   sourcesH:["文献(機械の確認 → 自分で原典を確かめる)","Sources (machine check, then you check the source)"], sourcesHint:["「機械」は識別子と書誌の照合の結果。VERIFIED は自分が現物(原典)を確かめたときだけ選ぶ。","\"Machine\" is the identifier/metadata check. Choose VERIFIED only after checking the item itself."],
   claimsH:["主張と出典","Claims and sources"], claimsHint:["原典の該当箇所を読み、支えるなら VERIFIED。支えないなら CONTRADICTED にして、主張を原典に合わせて自分で直す(逆はしない)。","Read the passage: VERIFIED if it supports the claim; otherwise CONTRADICTED, and revise the claim to match the source yourself (never the reverse)."],
   proposalsH:["提案(表記・書式の統一)","Proposals (notation and format)"], reviewH:["原稿とコメント","Manuscript and comments"], docLabel:["原稿","Manuscript"],
-  docHint:["本文はここでは編集しない。範囲を選んで、下の欄からコメントを書ける(コメントの作成は署名不要。解決は署名が要る)。","No editing here. Select a range to comment (writing a comment needs no signature; resolving does)."],
+  docHint:["本文はここでは編集しない。範囲を選んで、下の欄からコメントを書ける(コメントの作成も解決も合言葉は要らない)。","No editing here. Select a range to comment (neither writing nor resolving a comment needs the passphrase)."],
   newComment:["選んだ範囲にコメント","Comment on the selected range"], student:["学生","student"], advisor:["指導教員","advisor"], advisorCopied:["指導教員の指摘(自分で書き写す・署名なし)","advisor's point (copied by you; not signed)"], studentUnverified:["学生(この画面からは本人確認なし。指導教員のコメントは ./rk import-docx で署名つきで取り込む)","student (no identity check on this screen; advisor comments are imported, signed, with ./rk import-docx)"], saveComment:["コメントを保存","Save comment"],
   commentsH:["コメント","Comments"], rulesH:["記法規則(承認したものだけ使う)","Style rules (only approved ones apply)"], rulesHint:["根拠の資料(要項・シラバス・見本)の該当箇所と照らして決める。","Compare each with the cited handbook, syllabus or sample."],
-  changesH:["AI のツール実行中に検知した変更","Changes detected during AI tool calls"], changesHint:["AI は原稿に書かない設計なので、ここに出るものは意図しない変更の可能性が高い。差分を見て、残す・自分の編集だった・戻すを選ぶ。決めるまで検査は通らない。","The AI does not write the manuscript, so these are probably unintended. Look at the diff and choose keep / mine / revert. Checks fail until you decide."],
-  sectionsH:["節の署名(前回の署名からの差分を読む)","Section sign-off (read the diff since your last signature)"], daysH:["AI 利用の概要(開示の材料。自分の言葉で)","AI-use summary per day (in your own words)"], checklistH:["提出前のチェックリスト","Pre-submission checklist"],
-  basketH:["署名する項目","Items to sign"], signBtn:["合言葉で署名…","Sign with passphrase…"], basketHint:["合言葉は一回だけ入れる。署名が終わると鍵は捨てられ、保存されない。","Enter the passphrase once. The key is discarded after signing and never stored."],
+  changesH:["AI のツール実行中に検知した変更","Changes detected during AI tool calls"], changesHint:["道具・設定・人間の記録など、AI が書かない場所が AI のツール実行中に変わったもの(原稿への書き込みは由来の記録になり、ここには出ない)。差分を見て判断する。決めるまで検査は通らない。","Places the AI does not write (tools, settings, human records) that changed during an AI tool call (manuscript writes become provenance and do not appear here). Look at the diff and decide. Checks fail until you do."],
+  sectionsH:["節を読んだ確認(前回の確認からの差分を読む。任意)","Section reading (the diff since your last confirmation; optional)"], daysH:["AI 利用の概要(開示の材料。自分の言葉で)","AI-use summary per day (in your own words)"], checklistH:["提出前のチェックリスト","Pre-submission checklist"],
+  basketH:["署名する項目(VERIFIED・最終確認)","Items to sign (VERIFIED, final confirmation)"], signBtn:["合言葉で署名…","Sign with passphrase…"], basketHint:["合言葉は一回だけ入れる。署名が終わると鍵は捨てられ、保存されない。","Enter the passphrase once. The key is discarded after signing and never stored."],
   dlgH:["合言葉で署名する","Sign with your passphrase"], pwLabel:["合言葉(この画面と自分の端末にだけ入れる。チャットには入れない)","Passphrase (only on this page or in your terminal; never in the chat)"],
-  dlgOk:["署名する","Sign"], cancel:["やめる","Cancel"], footer:["ryukoku-writing(非公式)。この画面は 127.0.0.1 だけで動き、外部に通信しない。人間の判断は、合言葉の署名でだけ記録される。","ryukoku-writing (unofficial). This page runs on 127.0.0.1 only and makes no external requests. Human decisions are recorded only with a passphrase signature."],
+  dlgOk:["署名する","Sign"], cancel:["やめる","Cancel"], footer:["ryukoku-writing(非公式)。この画面は 127.0.0.1 だけで動き、外部に通信しない。判断は内容のハッシュつきで記録され、VERIFIED と提出前の最終確認は合言葉で署名される。","ryukoku-writing (unofficial). This page runs on 127.0.0.1 only and makes no external requests. Decisions are recorded with the hash of their content; VERIFIED and the final confirmation are signed with the passphrase."],
   show:["表示","Show"], hide:["閉じる","Hide"], add:["署名する項目に入れる","Add to items to sign"], remove:["外す","Remove"], note:["メモ","Note"],
-  mustShow:["先に「表示」で内容を確かめる","Show the content first"], none:["(なし)","(none)"], signed:["署名済み","signed"], unsigned:["署名なし","unsigned"],
-  machine:["機械","machine"], tabs:[["overview","はじめに","Start"],["research","問いと調査","Questions & research"],["evidence","文献と主張","Sources & claims"],["proposals","提案","Proposals"],["review","レビュー","Review"],["rules","記法","Style rules"],["changes","変更の検知","Detected changes"],["submit","提出前","Before submission"]],
+  mustShow:["先に「表示」で内容を確かめる","Show the content first"], none:["(なし)","(none)"], signed:["記録あり","recorded"], unsigned:["記録なし","no record"],
+  machine:["機械","machine"], tabs:[["overview","はじめに","Start"],["research","問いと調査","Questions & research"],["cards","主張カード","Claim cards"],["evidence","文献と主張","Sources & claims"],["proposals","提案","Proposals"],["review","レビュー","Review"],["rules","記法","Style rules"],["changes","変更の検知","Detected changes"],["submit","提出前","Before submission"]],
   first:["初めての署名。全文を読む。","First sign-off: read the whole text."], noPrev:["前回の署名時の内容がこの PC にない。全文を読み直す。","The last signed text is not on this computer; reread the whole text."],
   summary:["その日の概要(自分の言葉で)","Summary of that day (your own words)"], whereHow:["どの部分でどのように(任意)","Where and how (optional)"], suggested:["記録された種類(参考。概要ではない)","Recorded categories (for reference; not a summary)"],
   presubmitBtn:["提出前の記録を表示","Show the pre-submission record"], allChecked:["全項目を確かめると選べる","Tick every item first"],
@@ -140,12 +147,16 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const DEC = {VERIFIED:["VERIFIED(原典で確かめた)","VERIFIED (checked in the source)"],REJECTED:["使わない","not used"],CONTRADICTED:["CONTRADICTED(支えない)","CONTRADICTED"],NOT_FOUND:["NOT_FOUND(該当箇所がない)","NOT_FOUND"],
   approved:["承認","approve"],rejected:["却下 / 不採用","reject"],resolved:["解決(自分で対応した)","resolved (I handled it)"],accepted:["採用","accept"],reviewed:["読んで責任を持てる","read; I take responsibility"],
-  confirmed:["確認(自分の言葉の概要)","confirm (my own summary)"],kept_ai:["残す(AI の関与として記録)","keep (record as AI involvement)"],mine:["自分の編集だった","it was my own edit"],reverted:["元に戻す","revert"],ready:["提出前の確認を記録","record the pre-submission check"]};
+  confirmed:["確認(これは自分の主張 / 自分の言葉の概要)","confirm (this is my claim / my own summary)"],kept_ai:["残す(AI の関与として記録)","keep (record as AI involvement)"],mine:["自分の編集だった","it was my own edit"],reverted:["元に戻す","revert"],ready:["提出前の確認を記録","record the pre-submission check"]};
 const D = d => (DEC[d] ? DEC[d][EN ? 1 : 0] : d);
 let basket = [];
 function status(msg, bad){ const s = $("#status"); s.textContent = msg || ""; s.className = bad ? "bad" : ""; }
+// the session key arrives only as the #k=... fragment of the URL ./rk notebook printed on the student's terminal
+let SESSION = "";
+try { const m = /[#&]k=([A-Za-z0-9_-]+)/.exec(location.hash || ""); if (m) { SESSION = m[1]; sessionStorage.setItem("rk-session", SESSION); history.replaceState(null, "", location.pathname); } else { SESSION = sessionStorage.getItem("rk-session") || ""; } } catch (e) {}
 async function api(path, opts){
   const o = Object.assign({headers:{}}, opts || {});
+  o.headers["X-RK-Session"] = SESSION;
   if (o.body !== undefined){ o.method = "POST"; o.headers["Content-Type"] = "application/json"; o.headers["X-RK-Request"] = "1"; o.body = JSON.stringify(o.body); }
   const r = await fetch(path, o); let j = {}; try { j = await r.json(); } catch(e) {}
   if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
@@ -204,9 +215,11 @@ function renderView(v){
     case "source": return kv(c, ["id","title","authors","year","doi","isbn","ncid","crid","ndl_id","url","container","machine_status","machine_note","human_note"]);
     case "claim": return kv(c, ["claim_id","claim","locator","source_id","used_in","source_machine_status","source_human_status"]) + kv(c.source || {}, ["title","authors","year","doi","isbn","ncid","url"]);
     case "rule": return kv(c, ["id","kind","value","lang","source","page","quote","confidence","note"]);
+    case "card": { const N = {claim:["主張","Claim"],scope:["範囲と限定","Scope"],evidence:["必要な根拠","Evidence needed"],warrant:["論拠","Warrant"],objections:["予想される反論","Objections"],novelty:["新規性の見込み","Novelty"],words:["学生の言葉の原文","Your own words"]};
+      return Object.keys(N).filter(k => (c.items || {})[k] && c.items[k].length).map(k => `<h3>${esc(N[k][EN ? 1 : 0])}</h3><ul>${c.items[k].map(x => `<li>${x.ai ? `<span class="badge b-bad">ai_suggested</span> ` : ""}${esc(x.text)}</li>`).join("")}</ul>`).join(""); }
     case "comment": return `<div class="quote">「${esc(c.exact)}」</div><p>${esc(c.code)} · ${esc(c.creator)} <span class="badge">${esc(CH(c.channel))}</span>: ${esc(c.comment)}</p>` + (c.replies || []).map(r => `<div class="hint">└ ${esc(r[0])}(${esc(r[1])}): ${esc(r[2])}</div>`).join("");
     case "change": return `<p>${esc(c.what)} · ${esc(c.path || (c.parts || []).join(", "))} · ${esc(c.tool)} · ${esc(c.ts)}</p>` + (v.diff ? udiff(v.diff) : "") + (c.what === "manuscript" && !v.has_before ? `<p class="hint">${EN ? "No pre-change copy on this computer." : "変更前の写しがこの PC にない(戻す操作はできない)。"}</p>` : "");
-    case "section": return v.first ? `<p class="hint">${L("first")}</p><pre class="src">${esc(v.text)}</pre>` : (v.diff === null ? `<p class="hint">${L("noPrev")}</p><pre class="src">${esc(v.text)}</pre>` : udiff(v.diff) + `<details><summary>${EN ? "full text" : "全文"}</summary><pre class="src">${esc(v.text)}</pre></details>`);
+    case "section": return ((v.ai_paragraphs && v.ai_paragraphs.length) ? `<p class="hint">${EN ? "AI-written or revised paragraphs (lines): " : "AI が書いた・直した段落(行): "}${v.ai_paragraphs.map(a => esc(a[0] + "-" + a[1] + " " + a[2])).join(", ")}</p>` : "") + (v.first ? `<p class="hint">${L("first")}</p><pre class="src">${esc(v.text)}</pre>` : (v.diff === null ? `<p class="hint">${L("noPrev")}</p><pre class="src">${esc(v.text)}</pre>` : udiff(v.diff) + `<details><summary>${EN ? "full text" : "全文"}</summary><pre class="src">${esc(v.text)}</pre></details>`));
     case "ailog": return `<p>model: ${esc((v.models || []).join(", ") || "unknown")} · prompts: ${esc(v.prompts)}</p><p class="hint">${(v.areas || []).map(a => esc(a[0]) + "×" + esc(a[1])).join(", ")}</p><p class="hint">${L("suggested")}: ${esc(v.suggested)}</p>`;
     case "presubmit": return (v.errors && v.errors.length) ? `<ul class="warn">${v.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul>` : `<p class="hint">${esc(v.label)}</p>`;
     default: return `<pre class="src">${esc(JSON.stringify(c, null, 1))}</pre>`;
@@ -217,7 +230,17 @@ function decideHTML(v, opts){
   const sel = `<label>${esc(EN ? "Decision" : "判断")} <select class="dec"><option value="">—</option>${decs.map(x => `<option value="${esc(x)}">${esc(D(x))}</option>`).join("")}</select></label>`;
   let extra = `<label style="flex:1 1 200px">${L("note")} <input class="note" style="width:100%"></label>`;
   if (v.kind === "ailog") extra = `<label style="flex:1 1 100%">${L("summary")}<textarea class="note"></textarea></label><label style="flex:1 1 100%">${L("whereHow")}<input class="wh" style="width:100%"></label>`;
-  return `<div class="decide">${sel}${extra}<button type="button" class="add">${L("add")}</button></div>`;
+  return `<div class="decide">${sel}${extra}<button type="button" class="add">${L("record")}</button></div>`;
+}
+const NEEDS = (BOOT && BOOT.needs_signature) || [];
+const needsSig = (kind, dec) => NEEDS.some(x => x[0] === kind && x[1] === dec);
+async function recordNow(entry){
+  try {
+    const r = await api("/api/sign", {body: {items: [{kind: entry.kind, id: entry.id, decision: entry.decision, token: entry.token, note: entry.note, where_how: entry.where_how}]}});
+    const left = (r.results || []).filter(x => x.status !== "signed");
+    status(left.length ? left.map(x => x.kind + " " + x.id + ": " + x.reason).join(" / ") : L("recorded") + entry.label + " → " + D(entry.decision), !!left.length);
+    refresh();
+  } catch(err) { status(err.message, true); }
 }
 function wireDecide(det, v, it){
   const addBtn = det.querySelector(".add");
@@ -225,11 +248,14 @@ function wireDecide(det, v, it){
     const upd = () => { addBtn.disabled = checkedIds().length !== BOOT.checklist.length || (v.errors && v.errors.length > 0); addBtn.title = addBtn.disabled ? L("allChecked") : ""; };
     upd(); document.querySelectorAll(".ck").forEach(c => c.addEventListener("change", upd));
   }
+  const sel = det.querySelector(".dec");
+  sel.addEventListener("change", () => { addBtn.textContent = needsSig(v.kind, sel.value) ? L("add") : L("record"); });
   addBtn.addEventListener("click", () => {
     const dec = det.querySelector(".dec").value; if (!dec) { status(EN ? "Choose a decision" : "判断を選ぶ", true); return; }
     const note = (det.querySelector(".note") || {}).value || ""; const wh = (det.querySelector(".wh") || {}).value || "";
     const entry = {kind: v.kind, id: v.id, decision: dec, token: v.token, note: note, where_how: wh, label: v.label};
     if (v.kind === "presubmit") entry.checklist = checkedIds();
+    if (!needsSig(v.kind, dec)) { recordNow(entry); return; }
     basket = basket.filter(b => !(b.kind === v.kind && b.id === v.id)); basket.push(entry); renderBasket();
     status((EN ? "Added: " : "入れた: ") + v.label + " → " + D(dec));
   });
@@ -262,14 +288,18 @@ $("#dlgForm").addEventListener("submit", async e => {
 });
 let current = "overview";
 function refresh(){ openTab(current); loadState(); }
-async function loadState(){ const s = await api("/api/state"); $("#signers").textContent = (EN ? "signers: " : "署名者: ") + (s.signers.join(", ") || (EN ? "none (run ./rk setup)" : "なし(./rk setup)")); return s; }
+async function loadState(){ const s = await api("/api/state"); $("#signers").textContent = (EN ? "signers: " : "署名者: ") + (s.signers.join(", ") || (EN ? "none yet (needed only for VERIFIED and the final confirmation: ./rk verify or ./rk signoff registers it)" : "まだなし(VERIFIED と最終確認のときだけ要る。./rk verify か ./rk signoff で登録)")); return s; }
 function fill(el, items, opts){ el.innerHTML = ""; if (!items.length){ el.innerHTML = `<p class="hint">${L("none")}</p>`; return; } items.forEach(it => el.appendChild(itemRow(it, opts && opts(it)))); }
 const LOAD = {
   async overview(){ current = "overview"; const s = await loadState(); const c = s.counts;
     $("#overview").innerHTML = `<p>${EN ? "Course" : "科目"}: ${esc(s.course || "-")} · ai_policy: <strong>${esc(s.ai_policy)}</strong></p>
-      <p>${EN ? "Waiting" : "判断を待つもの"}: ${EN ? "proposals" : "提案"} ${c.hunks} · ${EN ? "detected changes" : "検知した変更"} ${c.changes} · ${EN ? "open comments" : "未解決コメント"} ${c.comments} · ${EN ? "rules" : "記法規則"} ${c.rules} · ${EN ? "sources" : "文献"} ${c.sources} · ${EN ? "claims" : "主張"} ${c.claims}</p>`
+      <p>${EN ? "Waiting" : "判断を待つもの"}: ${EN ? "claim cards" : "主張カード"} ${c.cards} · ${EN ? "proposals" : "提案"} ${c.hunks} · ${EN ? "detected changes" : "検知した変更"} ${c.changes} · ${EN ? "open comments" : "未解決コメント"} ${c.comments} · ${EN ? "rules" : "記法規則"} ${c.rules} · ${EN ? "sources" : "文献"} ${c.sources} · ${EN ? "claims" : "主張"} ${c.claims}</p>`
       + (s.errors.length ? `<h3>NG</h3><ul class="warn">${s.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul>` : `<p class="b-ok badge">check: OK</p>`)
-      + (s.warns.length ? `<h3>${EN ? "Notes" : "注意"}</h3><ul>${s.warns.map(e => `<li>${esc(e)}</li>`).join("")}</ul>` : ""); },
+      + (s.warns.length ? `<h3>${EN ? "Notes" : "注意"}</h3><ul>${s.warns.map(e => `<li>${esc(e)}</li>`).join("")}</ul>` : "");
+    const p = s.provenance || {by_origin: {}}; const b = p.by_origin;
+    $("#prov").innerHTML = `<p>${EN ? "paragraphs" : "段落"} ${p.paragraphs || 0}: ${EN ? "AI-written" : "AI が書いた"} ${b.ai_wrote || 0} · ${EN ? "AI-revised" : "AI が直した"} ${b.ai_edited || 0} · ${EN ? "AI's, then revised by you (estimated)" : "AI の段落を自分が直した(推定)"} ${b.student_after_ai || 0} · ${EN ? "yours (estimated)" : "自分(推定)"} ${b.student || 0} · ${EN ? "unrecorded" : "記録なし"} ${b.unrecorded || 0}</p><p class="hint">${EN ? "Details: ./rk facts or python3 tools/rk/rk.py provenance show" : "詳しくは ./rk facts か python3 tools/rk/rk.py provenance show"}</p>`; },
+  async cards(){ current = "cards"; const r = await api("/api/list?tab=cards");
+    fill($("#cards"), r.items, it => ({only: ["confirmed"], noDecide: it.confirmed, badges: `<span class="badge ${it.confirmed ? "b-ok" : "b-bad"}">${it.confirmed ? (EN ? "confirmed" : "確認済み") : it.stale ? (EN ? "changed after confirmation" : "確認の後に変わった") : "draft"}</span>`})); },
   async research(){ current = "research"; const r = await api("/api/list?tab=research");
     $("#questions").textContent = r.questions; $("#thinking").textContent = r.thinking; $("#searchProblems").textContent = (r.problems || []).join(" / ");
     const rows = r.searchlog.map(x => `<tr><td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.db)}</td><td>${esc(x.query)}</td><td>${x.hits == null ? "?" : esc(x.hits)}</td><td>${esc(x.question_ref)}</td><td>${esc(x.purpose)}</td><td>${esc((x.selected || []).join(", "))}</td><td>${esc(x.reason)}</td></tr>`).join("");
@@ -285,8 +315,10 @@ const LOAD = {
   async rules(){ current = "rules"; const r = await api("/api/list?tab=rules"); fill($("#rules"), r.items, it => ({noDecide: !!it.claimed})); },
   async changes(){ current = "changes"; const r = await api("/api/list?tab=changes"); fill($("#changes"), r.items); },
   async submit(){ current = "submit"; const r = await api("/api/list?tab=submit");
+    $("#facts").textContent = r.facts || "";
+    $("#statements").innerHTML = Object.keys(r.statements || {}).length ? Object.entries(r.statements).map(([k, t]) => `<h3>${esc(k)}</h3><pre class="src">${esc(t)}</pre>`).join("") : `<p class="hint">${EN ? "No disclosure statement yet (disclosure/statement.md; the AI may draft it from the facts)." : "開示文はまだない(disclosure/statement.md。事実から AI が下書きしてよい)。"}</p>`;
     fill($("#sections"), r.sections.filter(s => !s.current));
-    if (!r.sections.filter(s => !s.current).length) $("#sections").innerHTML = `<p class="hint">${EN ? "All sections are signed for their current content." : "すべての節が、今の内容で署名済み。"}</p>`;
+    if (!r.sections.filter(s => !s.current).length) $("#sections").innerHTML = `<p class="hint">${EN ? "All sections are confirmed for their current content." : "すべての節が、今の内容で確認済み。"}</p>`;
     fill($("#days"), r.days.filter(d => !d.confirmed));
     $("#checklist").innerHTML = BOOT.checklist.map(c => `<label style="display:block"><input type="checkbox" class="ck" value="${esc(c.id)}"> ${esc(EN ? c.en : c.ja)}</label>`).join("");
     const ps = $("#presubmit"); ps.innerHTML = "";

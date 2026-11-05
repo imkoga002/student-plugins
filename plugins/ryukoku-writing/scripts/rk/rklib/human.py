@@ -1,6 +1,8 @@
-"""Terminal flows for the human-only commands (./rk apply, verify, style, resolve, changes, disclose, signoff, optout,
-import-docx, sign, trust). Each flow shows every item, collects the person's decision item by item, then asks for
-the passphrase once and signs the decided items with their content digests (decide.sign_batch).
+"""Terminal flows for the human-only commands (./rk confirm, apply, verify, style, resolve, changes, disclose, signoff,
+optout, import-docx, sign, trust). Each flow shows every item and collects the person's decision item by item.
+Most decisions are then recorded as light confirmations at once (no passphrase). Only VERIFIED and the final
+pre-submission confirmation ask for the passphrase, once per batch (decide.sign_batch); the first time one is
+needed and no passphrase is registered yet, the flow registers it first (setup.step_passphrase).
 
 Speed bumps that do not depend on secrecy: the commands run only from the installed plugin (never from the project
 copy in tools/, which an AI tool could have rewritten), only at a real terminal (/dev/tty), and there is no key
@@ -10,17 +12,17 @@ import difflib
 import os
 import sys
 
-from . import decide, ledger, msguard, proposals, sign, style, subjects, trust
+from . import claimcards, decide, ledger, msguard, proposals, sign, style, subjects, trust
 from .common import RkError, feedback_lang, is_inside, read_text, tr, trust_path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CODE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))  # plugin root when run from the plugin
 
 CHECKLIST = {
-    "own_text": ("本文・問い・主張・結論はすべて自分で書いた(AI の文を一部でも使っていない。ガイドラインⅢ-4)",
-                 "I wrote all text, questions, claims and conclusions myself (no AI text, not even in part; guideline III-4)"),
-    "proposals_format_only": ("採用した AI の提案は表記・書式の統一だけで、開示の事実の一覧(./rk facts)を確かめた",
-                              "Accepted AI proposals only unified notation/format, and I checked the disclosure facts (./rk facts)"),
+    "claims_mine": ("問い・主張・結論は自分のもの。AI が書いた・直した文は読んで、自分の主張(主張カード)どおりであることを確かめた",
+                    "The questions, claims and conclusions are mine. I read every passage the AI wrote or revised and checked it says what my claim cards say"),
+    "disclosure_true": ("AI 利用の開示(./rk facts の事実と開示文)は由来の記録のとおりで正しく、科目の指示どおりに書いた(ガイドラインⅢ-3・Ⅲ-4)",
+                        "The AI-use disclosure (./rk facts and the statement) matches the provenance record and follows the course's instructions (guideline III-3, III-4)"),
     "facts_verified": ("引用・数値・ページ番号は自分で原典を読んで確かめた(主張の台帳で VERIFIED)",
                        "I checked quotations, figures and page numbers in the sources myself (claims VERIFIED)"),
     "quotes_marked": ("引用は「」かブロックで区別し、出典を示した(著作権法32条・48条)",
@@ -126,14 +128,40 @@ def plugin_integrity(proj):
     return None
 
 
-def finish_with_passphrase(proj, term, items, method="tty"):
-    if not items:
-        term.say(term.t("署名する項目がない(何も変えていない)。", "Nothing to sign (nothing changed)."))
-        return []
+def ensure_signer(proj, term):
+    """VERIFIED and the final confirmation need a passphrase. If none is registered (or trusted on this computer)
+    yet, register it now: the deferred first step of ./rk setup."""
+    trusted, _p, _n = trust.local_trusted(proj)
+    if trusted:
+        return trusted
+    from . import setup
     term.say("")
-    term.say(term.t("署名する %d 件:" % len(items), "%d item(s) to sign:" % len(items)))
+    term.say(term.t("VERIFIED(原典を読んだという宣言)と提出前の最終確認には、合言葉の署名が要る。まだ登録していないので、ここで登録する。",
+                    "VERIFIED (\"I read the original\") and the final pre-submission confirmation need a passphrase signature. None is registered yet, so register it now."))
+    return setup.step_passphrase(proj, term)
+
+
+def finish(proj, term, items, method="tty"):
+    """Record ITEMS: light confirmations at once; VERIFIED and the final confirmation with one passphrase entry."""
+    if not items:
+        term.say(term.t("記録する項目がない(何も変えていない)。", "Nothing to record (nothing changed)."))
+        return []
+    need = [it for it in items if sign.needs_signature(it["kind"], it["decision"])]
+    term.say("")
+    term.say(term.t("記録する %d 件:" % len(items), "%d item(s) to record:" % len(items)))
     for it in items:
-        term.say("  - %s %s → %s" % (it["kind"], it["id"], it["decision"]))
+        term.say("  - %s %s → %s%s" % (it["kind"], it["id"], it["decision"],
+                                        term.t("(合言葉の署名)", " (passphrase signature)") if it in need else ""))
+    if not need:
+        results = []
+        recs = decide.sign_batch(proj, items, None, method, results=results)
+        term.say(term.t("%d 件を記録した(合言葉は要らない判断)。" % len(recs), "Recorded %d item(s) (decisions that need no passphrase)." % len(recs)))
+        for r in results:
+            if r["status"] != "signed":
+                term.say(term.t("  記録しなかった: %s %s(%s)" % (r["kind"], r["id"], r.get("reason")),
+                                "  not recorded: %s %s (%s)" % (r["kind"], r["id"], r.get("reason"))))
+        return recs
+    ensure_signer(proj, term)
     term.say(term.t("合言葉は、この画面(端末)にだけ入れる。チャットや AI には決して入れない。",
                     "Type the passphrase only here, in your terminal. Never into the chat or to the AI."))
     for attempt in range(3):
@@ -147,13 +175,17 @@ def finish_with_passphrase(proj, term, items, method="tty"):
             continue
         finally:
             pw = None
-        term.say(term.t("%d 件に署名した。" % len(recs), "Signed %d item(s)." % len(recs)))
+        term.say(term.t("%d 件を記録した(うち署名 %d 件)。" % (len(recs), sum(1 for r in recs if r.get("sig"))),
+                        "Recorded %d item(s) (%d signed)." % (len(recs), sum(1 for r in recs if r.get("sig")))))
         for r in results:
             if r["status"] != "signed":
-                term.say(term.t("  署名しなかった: %s %s(%s)" % (r["kind"], r["id"], r.get("reason")),
-                                "  not signed: %s %s (%s)" % (r["kind"], r["id"], r.get("reason"))))
+                term.say(term.t("  記録しなかった: %s %s(%s)" % (r["kind"], r["id"], r.get("reason")),
+                                "  not recorded: %s %s (%s)" % (r["kind"], r["id"], r.get("reason"))))
         return recs
-    raise RkError(term.t("合言葉が 3 回合わなかったので署名しなかった。", "Passphrase did not match three times; nothing signed."))
+    raise RkError(term.t("合言葉が 3 回合わなかったので記録しなかった。", "Passphrase did not match three times; nothing recorded."))
+
+
+finish_with_passphrase = finish  # the v1 name
 
 
 def _show_hunk(term, s):
@@ -173,15 +205,15 @@ def _show_hunk(term, s):
 
 def why_proposals(lang):
     return tr(lang,
-        "なぜ提案なのか: AI は原稿に直接書かない(龍谷大学ガイドラインⅢ-4: 生成AIの作成物を一部であっても自分の成果物にしない)。"
-        "表記・書式の統一も、自分で一か所ずつ見て決める。道具が通すのは、全角半角(英数字・カナ)、句読点の組(、と，/。と．)、"
-        "日本語の周りの空白、見出しの番号、同じ文献の引用の書式の変更だけ。それ以外の文字(語・数字・小数点・符号・記号・頁)が一字でも"
-        "変わる提案は、作るときと採用するときに拒否する。決めるのは自分なので、差分を読んでから選ぶ。",
-        "Why proposals: the AI never writes your manuscript (Ryukoku guideline III-4). You decide every notation/format fix. "
-        "The tool lets through only full/half-width forms of letters, digits and kana, the punctuation system (、/， and 。/．), "
-        "spaces next to Japanese text, heading numbers and the form of a citation of the same work. A proposal that changes any "
-        "other character (a word, digit, decimal point, sign, mark or page) is refused when made and when applied. The decision "
-        "is yours: read each diff before choosing.")
+        "提案ファイルは、表記・書式の直しを一か所ずつ見て決めたいときの選択肢(科目が許せば、AI が原稿を直接直してもよく、その場合も由来は記録される)。"
+        "道具が通すのは、全角半角(英数字・カナ)、句読点の組(、と，/。と．)、日本語の周りの空白、見出しの番号、同じ文献の引用の書式の変更だけ。"
+        "それ以外の文字(語・数字・小数点・符号・記号・頁)が一字でも変わる提案は、作るときと採用するときに拒否する。採用した変更は由来の記録に"
+        "『AI の提案(書式)』として残る。差分を読んでから選ぶ。",
+        "Proposal files are an option for when you want to see each notation/format fix (if the course allows, the AI may also edit "
+        "the manuscript directly; provenance is recorded either way). The tool lets through only full/half-width forms of letters, "
+        "digits and kana, the punctuation system (、/， and 。/．), spaces next to Japanese text, heading numbers and the form of a "
+        "citation of the same work. A proposal that changes any other character is refused when made and when applied. Accepted "
+        "changes are recorded as provenance (AI proposal, format). Read each diff before choosing.")
 
 
 def cmd_apply(proj, ids=None):
@@ -226,7 +258,45 @@ def cmd_apply(proj, ids=None):
             break
         if k in ("y", "n"):
             items.append({"kind": "hunk", "id": s.sid, "decision": "accepted" if k == "y" else "rejected", "digest": s.digest})
-    finish_with_passphrase(proj, term, items)
+    finish(proj, term, items)
+    return 0
+
+
+def cmd_confirm(proj, ids=None):
+    """Claim cards: the student confirms 'this is my claim' (a light confirmation; no passphrase)."""
+    term = start(proj, "主張カードを読み、自分の主張かどうかを確かめる", "Read the claim cards and confirm which are your claims")
+    trusted, _p, _n = trust.local_trusted(proj)
+    idx, _b = sign.valid_index(proj, trusted)
+    cs = [s for s in subjects.cards(proj) if (not ids or s.sid in ids) and not sign.current(idx, "card", s.sid, s.digest)]
+    if not cs:
+        term.say(term.t("確認を待っている主張カードはない。", "No claim cards waiting."))
+        return 0
+    term.say(term.t("主張カードは、あなたの言葉を AI が聞き取って整理したもの。[ai_suggested] の印は AI が足した候補で、確認の対象に入らない。"
+                    "主張・範囲・あなたの言葉の原文が、あなたの考えと同じときだけ y を押す。違えば n にして、カードを直す(自分で、または AI に頼む)。",
+                    "A claim card is what the AI organised from your words. Items marked [ai_suggested] are the AI's candidates and are not "
+                    "part of what you confirm. Press y only if the claim, the scope and your own words say what you think; otherwise n, "
+                    "and fix the card (yourself or by asking the AI)."))
+    items = []
+    for s in cs:
+        c = s.content
+        term.say("\n" + term.c(s.sid, "1") + (term.t("(確認の後に変わった)", " (changed after your confirmation)") if sign.latest(idx, "card", s.sid) else ""))
+        names = dict(claimcards.SECTIONS)
+        for k in ("claim", "scope", "evidence", "warrant", "objections", "novelty", "words"):
+            its = c["items"].get(k) or []
+            if not its:
+                continue
+            term.say("  " + term.c(names[k][0] if term.lang != "en" else names[k][1], "1"))
+            for it in its:
+                term.say("    " + (term.c("[ai_suggested] ", "33") if it["ai"] else "") + it["text"])
+        k = term.key(term.t("  これは自分の主張か? [y]はい [n]違う(直す) [s]保留 [q]ここまで > ", "  is this your claim? [y]es [n]o (fix it) [s]kip [q]stop > "), "ynsq")
+        if k == "q":
+            break
+        if k == "y":
+            items.append({"kind": "card", "id": s.sid, "decision": "confirmed", "digest": s.digest})
+        elif k == "n":
+            term.say(term.t("  確認しなかった。どこが違うかを AI に伝えるか、claims/%s.md を自分で直す。" % s.sid,
+                            "  Not confirmed. Tell the AI what is wrong, or edit claims/%s.md yourself." % s.sid))
+    finish(proj, term, items)
     return 0
 
 
@@ -286,7 +356,7 @@ def cmd_verify(proj, ids=None):
                             "  When source and claim conflict, revise the claim to match the source (never the reverse)."))
         note = term.ask(term.t("  メモ(CONTRADICTED のときは必須): ", "  note (required for CONTRADICTED): ")).strip()
         items.append({"kind": "claim", "id": s.sid, "decision": status, "note": note})
-    finish_with_passphrase(proj, term, items)
+    finish(proj, term, items)
     return 0
 
 
@@ -311,7 +381,7 @@ def cmd_style(proj):
             break
         if k in ("a", "r"):
             items.append({"kind": "rule", "id": s.sid, "decision": "approved" if k == "a" else "rejected", "digest": s.digest})
-    finish_with_passphrase(proj, term, items)
+    finish(proj, term, items)
     return 0
 
 
@@ -333,7 +403,7 @@ def cmd_resolve(proj, ids=None):
             break
         if k == "r":
             items.append({"kind": "comment", "id": s.sid, "decision": "resolved", "digest": s.digest})
-    finish_with_passphrase(proj, term, items)
+    finish(proj, term, items)
     return 0
 
 
@@ -376,7 +446,7 @@ def cmd_changes(proj):
         if k == "s":
             continue
         items.append({"kind": "change", "id": s.sid, "decision": {"k": "kept_ai", "m": "mine", "r": "reverted"}[k], "digest": s.digest})
-    finish_with_passphrase(proj, term, items)
+    finish(proj, term, items)
     return 0
 
 
@@ -414,7 +484,7 @@ def cmd_disclose(proj):
         where = term.ask(term.t("  どの部分でどのように(任意。例: 第2章の文献探し): ", "  where and how (optional): ")).strip()
         if summary:
             items.append({"kind": "ailog", "id": s.sid, "decision": "confirmed", "note": summary, "where_how": where, "digest": s.digest})
-    finish_with_passphrase(proj, term, items)
+    finish(proj, term, items)
     return 0
 
 
@@ -439,6 +509,22 @@ def cmd_signoff(proj):
         return 1
     trusted, _p, _n = trust.local_trusted(proj)
     idx, _b = sign.valid_index(proj, trusted)
+    from . import disclosure, provenance
+    sm = provenance.summary(proj)
+    term.say(term.t("由来の記録: 段落 %d のうち AI が書いた %d・AI が直した %d・AI の段落を自分が直した(推定)%d・自分(推定)%d・記録なし %d"
+                    % (sm["paragraphs"], sm["by_origin"]["ai_wrote"][0], sm["by_origin"]["ai_edited"][0], sm["by_origin"]["student_after_ai"][0],
+                       sm["by_origin"]["student"][0], sm["by_origin"]["unrecorded"][0]),
+                    "Provenance: of %d paragraphs, AI-written %d, AI-revised %d, AI paragraphs you revised (estimated) %d, yours (estimated) %d, unrecorded %d"
+                    % (sm["paragraphs"], sm["by_origin"]["ai_wrote"][0], sm["by_origin"]["ai_edited"][0], sm["by_origin"]["student_after_ai"][0],
+                       sm["by_origin"]["student"][0], sm["by_origin"]["unrecorded"][0])))
+    st = subjects.disclosure_statements(proj)
+    term.say(term.t("開示文: %s" % (", ".join(st) or "なし(disclosure/statement.md。./rk facts の事実から作る)"),
+                    "Disclosure statement: %s" % (", ".join(st) or "none (disclosure/statement.md; draft it from ./rk facts)")))
+    for relp in st:
+        term.say("  ----- %s" % relp)
+        for ln in read_text(os.path.join(proj, relp)).split("\n")[:60]:
+            term.say("  " + ln)
+    del disclosure
     items = []
     for s in subjects.sections(proj):
         if sign.current(idx, "section", s.sid, s.digest):
@@ -453,20 +539,21 @@ def cmd_signoff(proj):
             term.say(term.t("  前回の署名からの差分(AI のツールの外で変わった箇所も含む):", "  Diff since your last sign-off (including changes made outside AI tool calls):"))
             for ln in diff[:120]:
                 term.say("  " + (term.c(ln, "31") if ln.startswith("-") else term.c(ln, "32") if ln.startswith("+") else ln))
-        k = term.key(term.t("  この内容を読み、自分の文章として責任を持てる? [y]はい [n]いいえ > ", "  read it and take responsibility for it as your own text? [y]/[n] > "), "yn")
+        k = term.key(term.t("  この内容を読み、提出物として責任を持てる?(AI が書いた・直した段落も含めて) [y]はい [n]いいえ > ",
+                            "  read it and take responsibility for it as your submission (including what the AI wrote or revised)? [y]/[n] > "), "yn")
         if k != "y":
-            term.say(term.t("  署名しない。読み直してから、もう一度 ./rk signoff。", "  Not signing. Reread, then run ./rk signoff again."))
+            term.say(term.t("  記録しない。読み直してから、もう一度 ./rk signoff。", "  Not recorded. Reread, then run ./rk signoff again."))
             return 1
         items.append({"kind": "section", "id": s.sid, "decision": "reviewed", "digest": s.digest})
     for cid in subjects.CHECKLIST_IDS:
         ja, en = CHECKLIST[cid]
         k = term.key("  [ ] %s  [y]/[n] > " % term.t(ja, en), "yn")
         if k != "y":
-            term.say(term.t("  この項目が満たせるまで提出前の署名はしない(節の署名だけ行う)。", "  Not signing the pre-submission record until this holds (section sign-offs only)."))
-            finish_with_passphrase(proj, term, items)
+            term.say(term.t("  この項目が満たせるまで提出前の確認はしない(節を読んだ確認だけ記録する)。", "  Not signing the pre-submission record until this holds (section confirmations only)."))
+            finish(proj, term, items)
             return 1
     items.append({"kind": "presubmit", "id": "submission", "decision": "ready"})
-    finish_with_passphrase(proj, term, items)
+    finish(proj, term, items)
     return 0
 
 
@@ -478,7 +565,7 @@ def cmd_optout(proj):
         term.say(term.t("設定の場所は使っているサービスの公式の案内で確かめる。確認できたら、もう一度 ./rk optout。",
                         "Check your service's official help, then run ./rk optout again."))
         return 1
-    finish_with_passphrase(proj, term, [{"kind": "optout", "id": "optout", "decision": "checked"}])
+    finish(proj, term, [{"kind": "optout", "id": "optout", "decision": "checked"}])
     return 0
 
 
@@ -492,7 +579,7 @@ def cmd_sign(proj, kind, sid, decision, note=""):
     k = term.key(term.t("  上の内容を確かめたうえで「%s」と記録する? [y]/[n] > " % decision, "  record '%s' for the content above? [y]/[n] > " % decision), "yn")
     if k != "y":
         return 1
-    finish_with_passphrase(proj, term, [{"kind": kind, "id": sid, "decision": decision, "note": note, "digest": s.digest}])
+    finish(proj, term, [{"kind": kind, "id": sid, "decision": decision, "note": note, "digest": s.digest}])
     return 0
 
 
@@ -538,12 +625,8 @@ def cmd_import_docx(proj, docx_path, doc):
     if term.key(term.t("  取り込む? [y]/[n] > ", "  import? [y]/[n] > "), "yn") != "y":
         return 1
     subj = subjects.import_subject(docx_path)
-    trusted, _p, _n = trust.local_trusted(proj)
-    pw = sign.read_passphrase(term.t("合言葉(入力は表示されない): ", "passphrase (not shown): "))
-    signer, secret = sign.unlock(trusted, pw)
-    pw = None
-    rec = sign.make_record(signer, secret, "import", subj.sid, "imported", subj.digest, {"doc": r, "count": len(items)}, "tty")
-    secret = None
+    rec = sign.make_confirmation("import", subj.sid, "imported", subj.digest, {"doc": r, "count": len(items)}, "tty",
+                                 name=decide.who(proj))
     st = Store(proj)
     n = orphan = 0
     for it in items:
@@ -562,6 +645,8 @@ def cmd_import_docx(proj, docx_path, doc):
 
 def run_human(cmd, proj, a):
     try:
+        if cmd == "confirm":
+            return cmd_confirm(proj, a.ids)
         if cmd == "apply":
             return cmd_apply(proj, a.ids)
         if cmd == "verify":

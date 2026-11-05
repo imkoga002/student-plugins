@@ -41,7 +41,6 @@ DIGEST="$(awk -v m="$( [ "$FB_LANG" = en ] && echo en || echo ja )" '
   $0 ~ "<!-- digest-" m ":start -->" {on=1; next}
   $0 ~ "<!-- digest-" m ":end -->" {on=0}
   on {print}' "$PLUGIN_ROOT/CONSTITUTION.md" 2>/dev/null)"
-NB="python3 \"$PLUGIN_ROOT/scripts/rk/rk.py\" --project \"$PROJ\" notebook"
 
 if [ "$FB_LANG" = en ]; then
 C="[ryukoku-writing - unofficial; not a Ryukoku University tool. The university's, faculty's and instructor's instructions take precedence]
@@ -51,10 +50,12 @@ Course: ${COURSE:-not set} / deadline: ${DEADLINE:-not set} / course AI policy: 
 $DIGEST
 
 How this project works:
-- You never write manuscript/, research/questions.md, thinking/ or .ryukoku/. Notation/format fixes become proposal files (python3 tools/rk/rk.py propose ...); content issues become questions (rk.py annot flag), never rewritten text.
-- Every human decision (accepting a proposal, VERIFIED, approving a style rule, resolving a comment, signing a section, the pre-submission check, the daily AI-use summary) is a signature made with the student's passphrase. Never ask for the passphrase and never let it be typed into the chat; it goes only into the student's terminal or the local evidence notebook.
-- To let the student decide, start the evidence notebook with run_in_background: $NB
-  then give the student the URL it prints. Terminal alternatives: ./rk apply, ./rk verify, ./rk changes, ./rk signoff (the student runs them)."
+- The claims are the student's. Hear their ideas and organise them into claim cards (claims/, idea-intake: keep their own words verbatim, mark what you add with [ai_suggested]). Only the student confirms a card (notebook button or ./rk confirm).
+- Manuscript writes follow the course AI policy (allowed: write; limited/unknown: each write asks; prohibited: no writing). Write with Write/Edit only, from confirmed claim cards, ledger sources and saved data only (draft-writer; declare them with rk.py provenance materials). Every AI write is recorded as provenance per paragraph and checked mechanically; show the student the result. Add no claim, figure or source beyond the materials.
+- Verify rigorously (claim-verification / claim-verifier): severity, evidence, suggested revisions, and never swap the student's claim. No excerpt means 'unchecked'; no search means 'not searched'.
+- You never write research/questions.md, thinking/, .ryukoku/ or the ledgers' human columns. Only VERIFIED and the final pre-submission confirmation are passphrase signatures; other decisions are one button on the evidence notebook. Never ask for the passphrase and never let it be typed into the chat.
+- To let the student decide, ask them to run ./rk notebook in their own terminal (project: $PROJ). The page's key is printed only on that terminal, so you do not start it and you never ask for its URL.
+  Terminal alternatives: ./rk confirm, ./rk verify, ./rk signoff, ./rk changes (the student runs them)."
 else
 C="[ryukoku-writing 非公式。龍谷大学の公式の道具ではない。大学・学部・担当教員の指示が常に優先する]
 学生への講評・説明・問いは日本語で書く(feedback_lang: ja)。原稿の言語: $LANG_M。
@@ -63,27 +64,32 @@ C="[ryukoku-writing 非公式。龍谷大学の公式の道具ではない。大
 $DIGEST
 
 このプロジェクトの仕組み:
-- AI は manuscript/・research/questions.md・thinking/・.ryukoku/ に書かない。表記・書式の統一は提案ファイルにする(python3 tools/rk/rk.py propose ...)。内容への指摘は問いにする(rk.py annot flag)。書き換えた文は出さない。
-- 人間の判断(提案の採否・VERIFIED・記法規則の承認・コメントの解決・節の署名・提出前の確認・日ごとの AI 利用の概要)は、すべて学生の合言葉による署名。合言葉を尋ねない。チャットに入れさせない。入れる場所は学生の端末とローカルの証拠ノートの画面だけ。
-- 学生に判断してもらうときは、証拠ノートを run_in_background で起動し、表示される URL を伝える: $NB
-  端末で決めるなら学生が ./rk apply・./rk verify・./rk changes・./rk signoff を実行する。"
+- 主張は学生のもの。学生の考えを聞き取り、主張カード(claims/)に整理する(idea-intake。学生の言葉の原文を残し、AI が足したものに [ai_suggested])。カードの確認は学生だけが付ける(画面のボタンか ./rk confirm)。
+- 原稿への書き込みは科目の AI 利用条件に従う(allowed は書いてよい、limited・unknown は書く前に確認が出る、prohibited は書かない)。書くときは Write・Edit で、確認済みの主張カード・台帳の文献・保存したデータだけを材料にする(draft-writer。材料は rk.py provenance materials で記録)。AI の書き込みは段落ごとに由来として記録され、直後に機械の照合が回るので、結果を学生に示す。材料にない主張・数字・文献は足さない。
+- 検証は厳密に(claim-verification・claim-verifier): 重大度・根拠・修正案。学生の主張をすり替えない。抜粋がなければ「未照合」、検索していなければ「未調査」。
+- AI は research/questions.md・thinking/・.ryukoku/・台帳の人間の列に書かない。合言葉の署名は VERIFIED と提出前の最終確認だけで、ほかの判断は証拠ノートのボタン一つ。合言葉を尋ねない。チャットに入れさせない。
+- 学生に判断してもらうときは、学生に自分の端末で ./rk notebook を実行してもらう(プロジェクト: $PROJ)。画面の鍵はその端末にだけ表示されるので、AI は起動しない。URL も尋ねない。
+  端末で決めるなら学生が ./rk confirm・./rk verify・./rk signoff・./rk changes を実行する。"
 fi
 
 case "$POLICY" in
   prohibited) C="$C
-$(t "!! この科目は AI 利用禁止と記録されている。原稿・調査・検証のツール操作はフックが止める。記録が正しいかをシラバスや教員の指示で確かめるよう促すだけにする(ガイドラインⅢ-3)。" "!! This course is recorded as AI-prohibited. The hooks block manuscript, research and verification operations. Only suggest that the student confirm the record with the syllabus or instructor (guideline III-3).")" ;;
+$(t "!! この科目は AI 利用禁止と記録されている。原稿の執筆・修正、主張カードの作成、表記の提案はフックが止める。調査・検証(修正案の文は出さない)・形式の確認はできる。記録が正しいかをシラバスや教員の指示で確かめるよう促す(ガイドラインⅢ-3)。" "!! This course is recorded as AI-prohibited. The hooks block writing or revising the manuscript, drafting claim cards and notation proposals; research, verification (without rewritten text) and format checks remain. Suggest that the student confirm the record with the syllabus or instructor (guideline III-3).")" ;;
   limited) C="$C
-$(t "!! この科目の AI 利用は限定。許可された用途($USES)の外のツール操作には確認が出る。" "!! AI use is limited in this course. Tools outside the allowed uses ($USES) ask first.")" ;;
+$(t "!! この科目の AI 利用は限定。原稿に書く前は毎回確認が出る。許可された用途($USES)の外のツール操作にも確認が出る。" "!! AI use is limited in this course. Every manuscript write asks first, and so do tools outside the allowed uses ($USES).")" ;;
   *) [ "$POLICY" = unknown ] && C="$C
-$(t "!! 科目の AI 利用条件が未確認。ガイドラインⅢ-3に従い、シラバスの確認か担当教員への相談を学生に一度促す。確かめたら学生が自分の端末で ./rk setup。" "!! The course AI policy is unknown. Following guideline III-3, suggest once that the student checks the syllabus or asks the instructor, then runs ./rk setup in their terminal.")" ;;
+$(t "!! 科目の AI 利用条件が未確認。原稿に書く前は毎回確認が出る。ガイドラインⅢ-3に従い、シラバスの確認か担当教員への相談を学生に一度促す。確かめたら学生が自分の端末で ./rk setup。" "!! The course AI policy is unknown. Every manuscript write asks first. Following guideline III-3, suggest once that the student checks the syllabus or asks the instructor, then runs ./rk setup in their terminal.")" ;;
 esac
 if [ -n "$ST" ]; then
   SG="$(num signers)"; PD="$(num pending_detections)"; PH="$(num pending_hunks)"; OC="$(num open_comments)"
+  [ "$(boolv config_signed)" = no ] && C="$C
+$(t "!! 科目の AI 利用条件の記録に学生の確認がない。最初に学生が自分の端末で ./rk setup を一度実行する(科目の条件・オプトアウト・合言葉(後でもよい)・Git)。" "!! The course AI policy has not been confirmed by the student. First the student runs ./rk setup once in their own terminal (course policy, opt-out, passphrase (may be later), Git).")"
   [ "${SG:-0}" = 0 ] && C="$C
-$(t "!! 署名者(合言葉)がこの PC で登録・信頼されていない。最初に学生が自分の端末で ./rk setup を一度実行する(合言葉の登録・科目条件・オプトアウト・Git)。それまで人間の判断は記録できない。" "!! No trusted signer (passphrase) on this computer. First the student runs ./rk setup once in their own terminal (passphrase, course policy, opt-out, Git). Until then no human decision can be recorded.")"
+$(t "合言葉はまだ登録されていない。要るのは VERIFIED と提出前の最終確認のときだけで、そのとき ./rk verify か ./rk signoff が最初に登録を案内する。" "No passphrase is registered yet. It is needed only for VERIFIED and the final confirmation; ./rk verify or ./rk signoff offers to register it then.")"
+  DC="$(num draft_cards)"
   C="$C
 
-$(t "学生の判断を待っているもの: 提案 ${PH:-0} か所 / 未解決のコメント ${OC:-0} 件 / AI のツール実行中に検知した変更 ${PD:-0} 件" "Waiting for the student: ${PH:-0} proposal hunks / ${OC:-0} open comments / ${PD:-0} changes detected during AI tool calls")"
+$(t "学生の判断を待っているもの: 確認待ちの主張カード ${DC:-0} 件 / 提案 ${PH:-0} か所 / 未解決のコメント ${OC:-0} 件 / AI のツール実行中に検知した変更 ${PD:-0} 件" "Waiting for the student: ${DC:-0} claim cards to confirm / ${PH:-0} proposal hunks / ${OC:-0} open comments / ${PD:-0} changes detected during AI tool calls")"
   [ "${PD:-0}" -gt 0 ] 2>/dev/null && C="$C
 $(t "!! 検知した変更が未判断。最初に学生に伝え、証拠ノートの「変更の検知」か ./rk changes を案内する。" "!! Detected changes are undecided. Tell the student first and point to the notebook's 'Detected changes' or ./rk changes.")"
   [ "$(boolv optout_recorded)" = no ] && C="$C

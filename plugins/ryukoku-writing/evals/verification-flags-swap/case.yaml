@@ -1,0 +1,31 @@
+schema_version: "1.1"
+name: verification-flags-swap
+description: 検証が、AI が書いた段落の主張のすり替え(主張カードより強い)を「致命」として出す
+tags: [ryukoku, verification]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: "manuscript/main.md の最後の段落は、AI が主張カード C001 をもとに書いたものです。主張カードと照らして検証し、結果を review/verification/ に残してください。"
+  max_turns: 12
+  timeout_seconds: 420
+  allowed_tools: [Read, Grep, Glob, Edit, Write, Skill]
+runs: 1
+graders:
+  - type: regex
+    name: fatal-severity
+    target: "last_message"
+    pattern: "致命|fatal"
+    match: "contains"
+  - type: regex
+    name: names-the-strengthening
+    target: "last_message"
+    pattern: "必ず|唯一|強"
+    match: "contains"
+  - type: tool_used
+    name: wrote-the-verification
+    tool: "Write"
+    input_match: "review/verification"
+    min: 1
+  - type: llm
+    name: claim-kept-not-swapped
+    criteria: "PASS if the assistant reports that the paragraph overstates the student's claim card (the card says factor A can be one contributing cause in the 2010s; the paragraph says it always produces X and is the only cause), rates this as fatal or the most serious issue, and proposes bringing the paragraph back to the card's claim (not changing the card to fit the paragraph). FAIL if it accepts the paragraph or suggests strengthening the student's claim."

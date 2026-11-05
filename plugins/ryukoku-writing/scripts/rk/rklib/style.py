@@ -98,7 +98,7 @@ def validate_proposed(rules):
         if r.get("confidence") not in ("high", "medium", "low"):
             probs.append("%s: confidence は high|medium|low" % rid)
         if r.get("status", "proposed") != "proposed":
-            probs.append("%s: 提案ファイルの status は proposed だけ(承認は学生が証拠ノートか ./rk style で署名して行う)" % rid)
+            probs.append("%s: 提案ファイルの status は proposed だけ(承認は学生が証拠ノートか ./rk style で行う)" % rid)
         if r.get("kind") == "punctuation" and len(r.get("value", "")) != 2:
             probs.append("%s: punctuation の value は2文字(読点と句点。例: 、。 / ，。 / ，．)" % rid)
     return probs
@@ -123,8 +123,8 @@ def approved_rules(proj, idx, lang, fb="ja"):
     ok, probs = [], []
     for r in rules:
         if not sign.current(idx, "rule", r.get("id", ""), rule_subject(r), ("approved",)):
-            probs.append(("style rule %s: no signed approval by the student, or changed after approval (not applied)" if fb == "en" else
-                          "記法規則 %s: 学生の署名つきの承認がない、または承認の後に内容が変わった(適用しない)") % r.get("id"))
+            probs.append(("style rule %s: no approval recorded by the student, or changed after approval (not applied)" if fb == "en" else
+                          "記法規則 %s: 学生の承認の記録がない、または承認の後に内容が変わった(適用しない)") % r.get("id"))
             continue
         if r.get("lang", "any") not in ("any", "", lang):
             continue

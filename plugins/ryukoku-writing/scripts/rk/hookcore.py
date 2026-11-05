@@ -63,9 +63,13 @@ def main(argv):
         a[2] = a[2] or "anon"  # pre() keys a call without tool_use_id as "anon"
         for p in _registered():
             if a[2] in msguard._windows(state_dir(p)):
-                r = msguard.post(p, a[1], a[3], a[2], a[4], a[5])
-                for k in res:
+                r = with_checks(p, msguard.post(p, a[1], a[3], a[2], a[4], a[5]))
+                for k in ("entries", "manuscript_changed", "other_changed"):
                     res[k] += r[k]
+                res.setdefault("provenance", []).extend(r.get("provenance") or [])
+                res.setdefault("checks", []).extend(r.get("checks") or [])
+                if r.get("note"):
+                    res["note"] = (res.get("note", "") + "\n" + r["note"]).strip()
         print(json.dumps(res, ensure_ascii=False))
         return 0
     proj = _proj(argv[1]) if len(argv) > 1 else None
@@ -76,7 +80,7 @@ def main(argv):
         msguard.pre(proj, argv[2] if len(argv) > 2 else "", argv[3] if len(argv) > 3 else "run")
     elif cmd == "post":
         a = argv + [""] * 7
-        print(json.dumps(msguard.post(proj, a[2], a[4], a[3], a[5], a[6]), ensure_ascii=False))
+        print(json.dumps(with_checks(proj, msguard.post(proj, a[2], a[4], a[3], a[5], a[6])), ensure_ascii=False))
     elif cmd == "cmdscan":
         from rklib import execgate
         a = argv + [""] * 5
@@ -116,6 +120,47 @@ def main(argv):
     elif cmd == "session":
         print(json.dumps(session(proj, argv[2] if len(argv) > 2 else "", argv[3] if len(argv) > 3 else ""), ensure_ascii=False))
     return 0
+
+
+def with_checks(proj, res):
+    """After an AI write to the manuscript: the mechanical part of the verification for the files it changed
+    (citations and their ledger state, uncited assertive sentences in AI paragraphs, numbers without a source, the
+    swap candidates against the claim cards), so the agent shows the student at once what to check."""
+    res.setdefault("checks", [])
+    try:
+        from rklib import verification
+        from rklib.common import feedback_lang, read_text
+        lang = feedback_lang(proj)
+        for pr in res.get("provenance") or []:
+            if not (pr.get("wrote") or pr.get("edited")):
+                continue
+            p = os.path.join(proj, pr["file"])
+            if os.path.isfile(p):
+                res["checks"] += verification.mechanical(proj, pr["file"], read_text(p), lang)[:12]
+    except Exception as e:  # noqa: BLE001 - never break the session
+        res["checks"].append("(mechanical check failed: %s)" % type(e).__name__)
+    prov = [p for p in res.get("provenance") or [] if p.get("wrote") or p.get("edited") or p.get("deleted")]
+    if prov:
+        try:
+            from rklib.common import feedback_lang
+            en = feedback_lang(proj) == "en"
+        except Exception:  # noqa: BLE001
+            en = False
+        what = "; ".join(("%s: wrote %d, revised %d, deleted %d paragraph(s)" if en else "%s: 新しく書いた段落 %d・直した段落 %d・消した段落 %d")
+                         % (p["file"], p["wrote"], p["edited"], p["deleted"]) for p in prov)
+        checks = " | ".join(res.get("checks") or []) or ("nothing" if en else "なし")
+        res["note"] = (("[ryukoku-writing] The manuscript write was recorded as provenance (%s; .ryukoku/provenance.jsonl). "
+                        "Mechanical checks (facts, not judgements): %s. Tell the student briefly what you wrote and these results. "
+                        "Do not add claims, figures or sources that are not in the confirmed claim cards, the ledger or the saved data. "
+                        "Check fatal or major candidates with the claim-verifier (if the text says more or something else than the "
+                        "student's claim card, fix the text or ask the student; never change the student's claim to fit the text).")
+                       if en else
+                       ("[ryukoku-writing] 原稿への書き込みを由来の記録に残した(%s。.ryukoku/provenance.jsonl)。"
+                        "機械の照合(事実であって判断ではない): %s。学生に、書いた内容とこの結果を短く示す。"
+                        "確認済みの主張カード・台帳・保存したデータにない主張・数字・文献は足さない。"
+                        "致命・重要の候補は claim-verifier で確かめる(文が学生の主張カードより強い・広い・別のことを言っていれば、"
+                        "文を直すか学生に尋ねる。主張を文に合わせて変えない)。")) % (what, checks)
+    return res
 
 
 def _model_path(proj):
@@ -202,8 +247,10 @@ def stop(proj):
     det = sum(1 for e in since if e.get("type") == "detection")
     props = sum(1 for e in since if e.get("type") == "event" and e.get("area") == "rk:propose")
     nev = sum(1 for e in since if e.get("type") == "event")
-    ailog.append(proj, {"type": "turn", "events": nev, "detections": det, "proposal_runs": props})
-    return {"detections": det, "proposal_runs": props}
+    ms = sum(1 for e in since if e.get("type") == "event" and e.get("action") == "write" and e.get("area") == "manuscript")
+    ver = sum(1 for e in since if e.get("type") == "event" and e.get("area") in ("rk:verification", "subagent") )
+    ailog.append(proj, {"type": "turn", "events": nev, "detections": det, "proposal_runs": props, "manuscript_writes": ms})
+    return {"detections": det, "proposal_runs": props, "manuscript_writes": ms, "verification_runs": ver}
 
 
 def session(proj, plugin_root, sid=""):
@@ -224,6 +271,11 @@ def session(proj, plugin_root, sid=""):
         search.purge_expired_cache(proj)
     except Exception:  # noqa: BLE001 - never break the session
         pass
+    try:
+        from rklib import provenance
+        out["student_edits_recorded"] = len(provenance.sync_student(proj))
+    except Exception:  # noqa: BLE001
+        pass
     miss = ailog.missing_witnessed(proj)
     out["missing_detections"] = len(miss)
     trusted, tprobs, _n = trust.local_trusted(proj)
@@ -243,6 +295,7 @@ def session(proj, plugin_root, sid=""):
     out["optout_recorded"] = bool(sign.latest(idx, "optout", "optout"))
     cfg = subjects.config_subject(proj)
     out["config_signed"] = bool(sign.current(idx, "config", cfg.sid, cfg.digest))
+    out["draft_cards"] = len([c for c in subjects.cards(proj) if not sign.current(idx, "card", c.sid, c.digest)])
     return out
 
 

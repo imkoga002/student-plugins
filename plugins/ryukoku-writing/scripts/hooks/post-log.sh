@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # PostToolUse of ryukoku-writing. Active only for a project with .ryukoku/config.yml. Fails open.
-#  - msguard post: did manuscript/ or a protected file change while this tool ran? -> a detection in the chained
-#    AI-use log (committed) and a note to the agent; `rk check` fails until the student signs a decision.
+#  - msguard post: did manuscript/ change while this tool ran? -> provenance, paragraph by paragraph
+#    (.ryukoku/provenance.jsonl), and the mechanical part of the verification as a note to the agent. Did a protected
+#    file change? -> a detection in the chained AI-use log and a note; `rk check` fails until the student decides.
 #  - one factual event in the chained AI-use log (no prompt text, no command lines; tool, area, target class).
 #  - WebSearch, and WebFetch of a database search URL: an automatic search record in
 #    research/search-log.jsonl (every search is logged). The question id and the reason are completed with `rk.py searchlog annotate`.
@@ -55,9 +56,12 @@ case "$TOOL" in
     else
       MG="$(pyrun -I -B "$HC" post "$PROJ" "$TOOL" "$TUID" "$SUM" "$FULLCMD" "$PFP" 2>/dev/null || true)"
     fi
+    NOTE="$(printf '%s' "$MG" | json_string_field note)"
+    [ -n "$NOTE" ] && CTX="$NOTE"
     if printf '%s' "$MG" | LC_ALL=C grep -q '"entries": \["U-'; then
-      CTX="$(t "[ryukoku-writing] このツールの実行中に、原稿(manuscript/)か守られているファイル(道具・設定・署名・問い・思考の記録)が変わった(検知: msguard)。AI はこれらに書かない設計なので、意図しない変更の可能性が高い。続ける前に学生にそのまま伝え、証拠ノートの「変更の検知」(または自分の端末の './rk changes')で、差分を見て残す・自分の編集だった・戻すを決めて署名するよう案内する。決まるまで './rk check' と CI は失敗する。検知: $MG" \
-"[ryukoku-writing] While this tool ran, manuscript/ or a protected file (tools, settings, signatures, questions, thinking log) changed (detected by msguard). The AI does not write these, so this is probably unintended. Before continuing, tell the student plainly and ask them to review the diff in the evidence notebook ('Detected changes') or with './rk changes', and sign keep / mine / revert. './rk check' and CI fail until then. Detected: $MG")"
+      CTX="${CTX:+$CTX
+}$(t "[ryukoku-writing] このツールの実行中に、守られているファイル(道具・設定・人間の記録・由来の記録・問い・思考の記録)が変わった(検知: msguard)。AI はこれらに書かない設計なので、意図しない変更の可能性が高い。続ける前に学生にそのまま伝え、証拠ノートの「変更の検知」(または自分の端末の './rk changes')で、差分を見て判断するよう案内する。決まるまで './rk check' と CI は失敗する。検知: $(printf '%s' "$MG" | LC_ALL=C sed -e 's/"note": "[^"]*"//' | head -c 1500 | utf8_clean)" \
+"[ryukoku-writing] While this tool ran, a protected file (tools, settings, human records, provenance, questions, thinking log) changed (detected by msguard). The AI does not write these, so this is probably unintended. Before continuing, tell the student plainly and ask them to review the diff in the evidence notebook ('Detected changes') or with './rk changes'. './rk check' and CI fail until then. Detected: $(printf '%s' "$MG" | LC_ALL=C sed -e 's/"note": "[^"]*"//' | head -c 1500 | utf8_clean)")"
     fi ;;
 esac
 

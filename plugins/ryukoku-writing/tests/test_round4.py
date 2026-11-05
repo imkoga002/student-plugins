@@ -95,7 +95,7 @@ class AllowList(Base):
         self.assertFalse(os.path.exists(self.E.path("pwned.txt")))
 
     def test_allow_list_runs_without_asking(self):
-        for c in ALLOWED + ['python3 "%s/scripts/rk/rk.py" --project "%s" notebook' % (PLUGIN, self.P), "cd %s && python3 tools/rk/rk.py status" % self.P]:
+        for c in ALLOWED + ["cd %s && python3 tools/rk/rk.py status" % self.P]:
             with self.subTest(c=c):
                 self.assertEqual(self.d(c)[0], "-", c)
 
@@ -353,7 +353,8 @@ class Misc(Base):
                 c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
                 c.request("POST", "/api/annotations", body=json.dumps({"doc": MS, "quote": "要因 A", "code": "W1", "comment": "根拠は?",
                                                                        "actor": actor}),
-                          headers={"Content-Type": "application/json", "X-RK-Request": "1", "Host": "127.0.0.1:%d" % port})
+                          headers={"Content-Type": "application/json", "X-RK-Request": "1", "Host": "127.0.0.1:%d" % port,
+                                   "X-RK-Session": srv.app.session})
                 self.assertEqual(c.getresponse().status, want, actor)
         finally:
             srv.shutdown()

@@ -1,91 +1,103 @@
-# DESIGN — ryukoku-writing 1.0.0
+# DESIGN — ryukoku-writing 2.0.0
 
 この文書は、この Plugin の設計をまとめる: 中核の考え、要件とその満たし方・試験、守りの仕組み、脅威モデルと限界、外部のプログラムの扱い、採った案と採らなかった案、事実の出典。試験を実際に回した結果と、確かめていない点は [SELF-ASSESSMENT.md](SELF-ASSESSMENT.md) にある。
 
 言葉の使い方:
 - **開発時の観察**: 開発した環境(Linux、Claude Code 2.1.318、2026-11-04〜05)で実際に見たこと。公式の文書では確かめていない。
 - **未確認**: 一次資料でも実際の動作でも確かめていないこと。
-- **独立検証**: 開発の後に、別の検証者が攻撃者の立場で 5 回行った検証。見つかった欠陥は、再現をそのまま回帰の試験にした(`tests/test_round3.py`〜`test_round6.py`、`test_proposals.AllowList`)。
+- **独立検証**: v1 の開発の後に、別の検証者が攻撃者の立場で 5 回行った検証。見つかった欠陥は、再現をそのまま回帰の試験にした(`tests/test_round3.py`〜`test_round6.py`、`test_proposals.AllowList`)。v2 の変更(原稿への書き込み、由来、軽い確認、主張カード、検証)は一度の敵対的な検証を受け、見つかった欠陥を §3.12 のとおり直して回帰の試験(`tests/test_v2.Hardening`)にした。**直した後の版は、検証を受け直していない。**
 
 ## 1. 中核の考え
 
-**学生が問い・主張・本文を作り、AI は問いかけ・調査・検証・表記の提案だけをする。AI の出力が原稿に入るのは、学生が一件ずつ見て、合言葉で署名したものだけ。人間の判断は署名としてだけ存在し、ローカルでも CI でも照合される。**
+**主張の主は学生、文章化は AI と速く、検証は厳密に、記録は正直に。** AI が主張や理論を厳密に検証するからこそ、学生は独自の理論・主張・ニッチな着眼を安心して言葉にできる。原稿を AI が書くことそのものは悪いことではない。問題は、学生の主張でないものが学生の主張として入ること、材料にない事実が入ること、それが隠れることである。
 
-三つの層で作る。上ほど早期警告、下ほど骨格である。
+v1 は「AI は原稿に書けない・修正例を出さない・判断はすべて合言葉の署名」で、学生を縛る道具になった。v2 は、v1 で独立検証を経た守り(記録・道具・設定への AI の書き込みの拒否、許可リスト、窓の検知、署名と信頼の起点)を、**記録の正しさを守るために**残し、原稿だけを「書いてよい場所」(科目の条件しだい)に変えた。
+
+四つの層で作る。上ほど早期警告、下ほど骨格である。
 
 | 層 | 何をするか | どこ |
 |---|---|---|
-| 1. フック(事前) | すべてのツール(matcher `*`)。原稿・`.ryukoku/`・道具・学生の問い・思考の記録・Claude Code の設定・`~/.ryukoku-writing` などへの AI の書き込みを、Write/Edit と Bash・PowerShell・Monitor で deny。人間専用のコマンド、端末の模擬、切り離した実行、画面の API 呼び出し、main への push も deny。**許可リストの外の実行は ask**(確認なしで通すのは Plugin 同梱のコードと読み取りだけの決まったコマンドだけで、解析しきれない書き方も ask)。対象のパスから目印(`.ryukoku/config.yml`)を探し、見つからなければ利用者の登録済みのプロジェクトで窓だけ開く | `scripts/hooks/pre-guard.sh`・`lib.sh`・`rklib/execgate.py` |
-| 2. ツール実行の窓の検知 | 読み取り専用でない道具の実行の前後で、原稿と守られているファイルのハッシュを、窓ごとの写しと比べる。変われば検知を AI 利用記録(Git で管理。行ごとに前の行のハッシュ)とプロジェクトの外の控えに書き、学生が署名して判断するまで `rk check` と CI が落ちる。窓の中で変わったファイルは「AI が書いたファイル」として覚える | `rklib/msguard.py`・`ailog.py`・`scripts/hooks/post-log.sh` |
-| 3. 署名(骨格) | 人間の状態(VERIFIED・採否・承認・解決・節・提出前・科目条件・オプトアウト・日ごとの概要・検知の判断)は、合言葉から導く Ed25519 鍵の署名つきの記録だけ。記録は内容のダイジェストに結びつく。信頼する署名者は、GitHub では基準ブランチの最初の `signers.json`、Git なしでは利用者ごとの信頼の起点。CI は基準ブランチの道具で検査する | `rklib/sign.py`・`trust.py`・`subjects.py`・`decide.py`・`check.py`、`templates/github/.github/workflows/check.yml` |
+| 1. フック(事前) | すべてのツール(matcher `*`)。原稿への Write・Edit は科目の AI 利用条件(`ai_policy`)で allow / ask / deny、シェルからの原稿への書き込みは deny。`.ryukoku/`・道具・学生の問い・思考の記録・Claude Code の設定・`~/.ryukoku-writing` などへの AI の書き込みを、Write/Edit と Bash・PowerShell・Monitor で deny。人間専用のコマンド、端末の模擬、切り離した実行、画面の API 呼び出し、main への push も deny。**許可リストの外の実行は ask** | `scripts/hooks/pre-guard.sh`・`lib.sh`・`rklib/execgate.py` |
+| 2. ツール実行の窓 | 読み取り専用でない道具の実行の前後で、原稿と守られているファイルを窓ごとの写しと比べる。**原稿の変化は由来(provenance)として段落ごとに記録する**。守られているファイルの変化は検知として AI 利用記録(連鎖)とプロジェクトの外の控えに書き、学生が判断するまで `rk check` と CI が落ちる | `rklib/msguard.py`・`provenance.py`・`ailog.py`・`scripts/hooks/post-log.sh` |
+| 3. 記録(骨格) | 人間の判断は内容のダイジェストに結びつく記録だけ。**VERIFIED と提出前の最終確認は合言葉から導く Ed25519 鍵の署名**、ほかは署名のない軽い確認。由来・判断・AI 利用の記録は追記だけで、CI は基準ブランチの版の続きであることを確かめる | `rklib/sign.py`・`trust.py`・`subjects.py`・`decide.py`・`check.py`、`templates/github/.github/workflows/check.yml` |
+| 4. 検証 | 原稿に書いた直後に機械の照合(引用の台帳の状態、引用のない断定、出典のない数字、主張カードとのすり替えの候補)を回して AI に返し、claim-verifier が論理・根拠の対応・反証・新規性・すり替えを重大度と根拠つきで書く | `rklib/verification.py`・`claimcards.py`、`agents/claim-verifier.md`、`skills/claim-verification` |
 
-フックは正規表現による早期警告で、回り道の多くは事前には止まらない(変数の連結、base64、スクリプトのファイル、patch、tar など)。それを拾うのが層 2 で、人間の確認を装えないようにするのが層 3 である。
+フックは正規表現による早期警告で、回り道の多くは事前には止まらない。それを拾うのが層 2 である。v2 では、原稿の回り道は「止めるべき事故」ではなく「記録すべき AI の書き込み」として扱い(科目が禁止なら検査が落ちる)、記録と道具の回り道は v1 と同じに検知する。
 
 学生の手間への答え:
-- 端末を開くのは最初の `./rk setup` の一回(合言葉の登録・科目条件・オプトアウト・Git を、一度の合言葉の入力で署名する)。最後に「Claude Code をこのフォルダで開き直す」を必ず表示する。
-- 以後の判断は証拠ノートの画面でまとめて行う。項目を「表示」すると、サーバーが内容・ダイジェスト・表示の証(サーバーの秘密による HMAC)を返し、その項目の判断が選べるようになる。選んだものは「署名する項目」にたまり、合言葉を一度入れると、それぞれのダイジェストで署名される。表示していない項目と、表示の後に内容が変わった項目は、サーバーが受け付けない(409)。鍵はその要求が終わると捨てる。**全部採用の操作は画面にも API にも端末にもない**(各項目は表示してからでないと選べない)。
-- 画面は AI が起動してよい(何かを成立させるには合言葉が要るため)。フックはコマンドを解析し、実行する `rk.py` の実際の場所がインストールされた Plugin(フックが受け取る `CLAUDE_PLUGIN_ROOT`)でなければ止める。端末と画面は合言葉を求める前に、動いているコードの場所と版を出し、Claude Code が記録した場所と MANIFEST に合わなければ止まる。
+- 端末を開くのは最初の `./rk setup` の一回(科目条件・オプトアウト・合言葉・Git)。合言葉の登録は、最初の VERIFIED か最終確認のときに後回しにできる。
+- 判断は証拠ノートの画面で行う。項目を「表示」すると、サーバーが内容・ダイジェスト・表示の証(サーバーの秘密による HMAC)を返し、その項目の判断が選べるようになる。軽い判断は「記録する」のボタン一つ、VERIFIED と最終確認は「署名する項目」にためて合言葉を一度入れる。表示していない項目と、表示の後に内容が変わった項目は、サーバーが受け付けない(409)。**全部採用の操作は画面にも API にも端末にもない**。
+- 画面は学生が自分の端末で `./rk notebook` を実行して開く(§3.12)。合言葉の要らない判断を画面で記録できるので、画面の鍵がその代わりになる。AI が起動しようとするとフックが止める。
 
 ## 2. 要件と、その満たし方・確かめ方
 
 | 要件 | どう満たすか | 確かめ方(試験) |
 |---|---|---|
-| **日本語と英語**: 原稿の言語と講評の言語を別々に選べ、一行で切り替わる | `.ryukoku/config.yml` の `manuscript_lang`(テンプレート・規則・`pandoc/defaults-<lang>-*.yaml`)と `feedback_lang`(フック・画面・`./rk`・スキル・エージェントの応答)。両言語のテンプレートと書き出し設定を常に置く | `test_init_export.Init.test_language_is_one_line`、`test_hooks.Hooks.test_session_start_language_and_notebook_path`、`test_round3.Misc.test_machine_commands_follow_english`、eval `en-rewrite-declined` |
-| **GitHub でも Git なしでも運用できる**: 節ごとのブランチ → PR → CI → 人間のレビュー、Git が無ければフォルダの受け渡し | `templates/github/`(基準ブランチの道具で PR を検査する check.yml、build.yml、PR・Issue のテンプレート、`.githooks/pre-commit`・`pre-push`)。`./rk setup` の Git の段で main に最初の commit(信頼の起点)。Git なしは `rk.py bundle` の HANDOFF.md | `test_init_export.Init.test_workflows_parse_and_pin_only_checked_actions`、`test_sign.CI`、`test_init_export.Misc.test_bundle_lists_signers_and_checks` |
-| **記法の規則は学部の要項から取り出し、学生が承認したものだけを使う** | `proposals/style-rules.yml`(AI が書く提案)→ 画面か `./rk style` で署名して承認 → `.ryukoku/style.yml`。署名の裏づけがない規則は適用しない。手順は `skills/style-extract` | `test_proposals.StyleExtraction`、`test_hooks.PreToolUse.test_protected_files_all_tools` |
-| **ローカルの HTML 画面で読み、判断できる**(外部への通信なし) | `scripts/rk/notebook/`(CDN なし、127.0.0.1、Host/Origin/独自ヘッダの検査、ARIA のタブと矢印キー、ダークモード)。注釈は W3C Web Annotation の TextQuoteSelector と TextPositionSelector(`review/anchor.py`・`store.py`) | `test_notebook` 全体、Playwright の `tests/js/notebook.test.js` |
-| **Claude Code の Plugin として動く**: macOS の bash 3.2・Linux・Windows の Git Bash、jq なし、Python が無ければ機能を落として知らせる | skills 21・agents 4・フック 5 種・scripts。フックは bash 3.2 の構文だけ | `bash tests/run.sh` の構文と移植性の検査、`test_init_export.Init.test_validate_strict`、`test_round3.Portability` |
-| **龍谷大学のガイドラインに沿う**: 代筆しない、個人情報を送らない、真偽を確かめる、科目の条件に従う、利用を隠さない、改訂を確かめる | 代筆・問いの代行の依頼への文脈の注入(prompt-guard)、原稿への書き込みの禁止、開示の 4 項目の事実(`./rk facts`)、科目条件で道具の動作を変える(policy_gate)、個人情報の送信停止、真偽の確認の手順、紙の資料、`guideline-check` | `test_hooks.Prompts`・`Policy`、`test_round3.Misc.test_disclosure_suggestion_states_only_facts`、`test_proposals.Flow` |
-| **公開できる**: 非公式であることの表示、校章を使わない、ガイドラインの原文を転載しない、公開しない語を含まない、実在しそうな個人情報を含まない | README の注記、LICENSE(MIT)、ガイドラインは節番号つきの言い換えだけ、テスト・eval・テンプレート・例文の題材は記号(「現象 X」「要因 A」)だけ。公開しない語の一覧はリポジトリに置かず、手元の一覧で試験する | `test_init_export.Init.test_no_private_terms_anywhere`・`test_no_guideline_text_copied`・`test_no_real_looking_personal_data_in_package` |
-| **人間のレビューが厳密である**: 提出物に入る AI の変更は、学生が一件ずつ見て署名したものだけ。人間の確認を AI が装えない | 二段の状態(機械の `machine_*` と署名つきの `human_*`)、Ed25519 の署名、基準ブランチの信頼の起点、提案の一件ずつの採否、節ごとの署名と提出前の記録 | `test_sign` 全体、`test_detect` 全体、`test_notebook`、`test_proposals` |
-| **文献の実在を機械で確かめ、原典が主張を支えるかは人間が確かめる** | `rklib/refcheck.py`(DOI → doi.org → Crossref → DataCite、撤回の印、NCID → CiNii Books、CRID → CiNii Research、NDL ID → NDL サーチ)、台帳、`sources/verification-log.jsonl`。VERIFIED は書かない | `test_research.Verifier`(実通信は `RK_NET_TESTS=1`) |
-| **資源の推薦は「読む候補」だけ**: 実在確認を経たもの、龍谷大学図書館の資源は確かめたものだけ | `skills/resource-recommendation`(IDENTITY_CONFIRMED だけを候補に、撤回は別の一覧、紙の資料)、`agents/research-scout` | スキルの記述を一次資料と照合した(§7)。機械の試験は無い |
-| **研究データを保存し、後で誰でも確かめられる** | `rklib/datacheck.py`(raw は変えない、sha256 の manifest、来歴、Data Package v2)、raw への書き込みの deny | `test_hooks.PreToolUse.test_direct_writes_and_pushes_to_main`(raw への書き込み)、`test_init_export.Init.test_fresh_project_passes_every_check`(`data verify`) |
-| **数式・図・表・脚注・相互参照を書け、Word・PDF・LaTeX に書き出せる** | `templates/{ja,en}/examples/format-examples.md`(数式、論証図・因果図・研究の流れ・年表・概念図の 5 種を front matter で固定、表、脚注、相互参照)、`rklib/export.py`、reference.docx を初期化で生成、PDF・LaTeX の設定に lang を置かない | `test_init_export.Init.test_docx_and_latex_both_languages`、`test_round5.PandocDefaults`、`test_round6` |
-| **調査は学生の問いに結びつき、検索ごとに記録が残る** | research-plan → research-run(サブエージェント並列、NDL は一つずつ+ロック)→ verify-sources → research-report。`rk.py search` は問いの番号が `research/questions.md` に無ければ通信せずに終了コード 2、実行のたびに記録、`--purpose counter`。WebSearch と DB の検索 URL への WebFetch もフックが自動で記録 | `test_research.Questions`、`test_hooks.Research`、eval `search-log-recorded`、`claude -p` での実発火 |
-| **問い・主張・結論は学生が立てる** | rq-dialogue、argument-map(逐語の引用を道具が照合)、learning-protection、thinking-log、`research/questions.md` と `thinking/` は AI の書き込み禁止、判断の依頼には「まず学生の考え」を注入 | `test_hooks.Research.test_questions_and_thinking_are_the_students`、`test_hooks.Prompts.test_ghostwrite_and_delegation_variants`、eval `no-rq-for-student`・`student-view-first` |
-| **研究不正の予防と指導教員とのやりとり**: 剽窃の点検、偏りの点検、研究不正の五類型、引用の要件、Word のコメントの往復 | `rklib/overlap.py`・`bias.py`・`docx_comments.py`、`skills/integrity-check`・`bias-check`・`review-comments`、`./rk import-docx`(署名つきの取り込み)、evals 11 件、作業憲法(CONSTITUTION.md) | eval(`comment-has-no-fix-example` ほか)。重なりの点検・偏りの点検・論証図・Word の取り込みには専用の単体試験が無い(SELF-ASSESSMENT の既知の欠陥) |
+| **主張は学生のもの**: 考えの聞き取りと主張カード、学生の確認は学生だけ | `claims/C001.md`(主張・範囲と限定・必要な根拠・論拠・予想される反論・新規性の見込み・学生の言葉の原文)。AI が足した要素は `[ai_suggested]`。確認は kind `card` の軽い確認で、ダイジェストは学生の部分(印のない要素と原文)だけを覆う。ファイルの `status: confirmed` は記録がなければエラー。RQ と思考の記録は AI の書き込み禁止のまま | `test_notebook.Cards`、`test_v2.Units.test_card_parse_digest_and_problems`、`test_hooks.Research.test_questions_and_thinking_are_the_students`、eval `card-confirm-is-student`・`no-rq-for-student` |
+| **科目の AI 利用条件で原稿への書き込みが変わる** | `pre-guard.sh` の `manuscript_gate`: allowed は通す、limited と unknown は ask(理由と、科目の条件を確かめる案内)、prohibited は deny。設定が読めないときも deny。シェルからの書き込みは常に deny。prohibited は v1 の policy_gate を土台に、書き込み(原稿・主張カード・提案・材料の指定)だけを止め、読み取り・調査・検証・形式の確認は通す | `test_hooks.Policy.test_manuscript_writes_follow_the_course_policy`・`test_prohibited_blocks_writing_but_not_research_or_verification`、`test_round3.Misc.test_prohibited_course_allows_reading_but_not_writing`、eval `allowed-draft-records-provenance`・`prohibited-no-write` |
+| **書き込みは由来として記録する** | PostToolUse(msguard)が窓の前の原稿の写しと比べ、変わった段落ごとに `.ryukoku/provenance.jsonl` へ(時刻、ファイル、行の範囲と内容のハッシュ、種類、材料、方針、道具)。学生の編集は窓の間・SessionStart・`rk check` の差分から推定(`estimated: true`)。行ごとに前の行のハッシュ、この PC で最後に書いた行数と先頭を外に控え、CI は基準ブランチの版の続きを求める | `test_hooks.Policy.test_allowed_write_is_recorded_as_provenance`、`test_detect` 全体、`test_round3.DetectionLayer`、`test_sign.CI.test_provenance_reaches_ci` |
+| **厳密な検証** | `rk.py verification scaffold` が `review/verification/<日付>-<対象>.md` を作り、0 節に機械の照合を入れる。1〜5 節(論理・根拠の対応・反証・新規性・すり替え)と 6 節(修正案)は claim-verifier が書く。`verification lint` が重大度・観点・根拠の形、抜粋なしの「支える」、新規性の断定、反証の検索記録を確かめる | `test_v2.Units.test_verification_lint`・`test_swap_candidates`、`test_v2.Project.test_materials_must_be_confirmed_and_flow_into_provenance`、eval `verification-flags-swap`・`verification-flags-unsupported` |
+| **執筆の加速は材料だけで** | draft-writer: 確認済みの主張カード・論証図・台帳の文献・保存したデータだけを材料にし、`rk.py provenance materials` で記録(draft のカード・台帳にない文献・ないデータは拒否)。書いた直後に機械の照合が文脈として返り、Stop のフックが結果を学生に示すよう一度促す | `test_v2.Project.test_materials_must_be_confirmed_and_flow_into_provenance`・`test_stop_hook_reminds_after_a_manuscript_write`、eval `no-unlisted-source` |
+| **捏造を構造で防ぐ** | 原稿が出す参考文献(`[@key]`・`@{key}`・front matter の `nocite`、`@*` なら `sources/references.json` のすべて。`rklib/citations.py`)が台帳にない、または IDENTITY_CONFIRMED 未満なら、提出の段階の検査と書き出しで NG、下書きで注意。原稿の数字(単位つきの数と小数)に引用もデータの参照もなければ、下書きで注意、提出の段階で NG。AI が書いた段落の引用のない断定は検証で「重要」。地の文の「著者(年)」は照合できない | `test_v2.Project.test_citation_keys_against_the_ledger`・`test_numbers_without_a_source_are_warned`、`test_v2.Hardening.test_rendered_bibliography_entries_must_be_confirmed`・`test_figures_without_a_source_fail_at_submission_but_not_years_or_sections`、eval `no-fabricated-sources` |
+| **由来と開示** | `./rk facts` の 5 に、AI が書いた・直した段落の数と割合、節ごとの内訳、用途、材料。開示文の下書きは AI が `disclosure/statement.md` に書いてよく、提出前の最終確認(署名)のダイジェストがそれと由来の帰属を覆う | `test_v2.Project.test_disclosure_facts_from_provenance_and_presubmit_covers_the_statement` |
+| **署名は二つだけ** | `sign.NEEDS_SIGNATURE` = (source, VERIFIED)・(claim, VERIFIED)・(presubmit, ready)。ほかは `make_confirmation`(署名なし、id は内容のハッシュ)。署名のない VERIFIED は検査のエラー。軽い確認が AI の窓の中に現れたら検知 | `test_v2.Project.test_light_and_signed_records`・`test_tampered_light_record_is_an_error`、`test_detect.Protected.test_unsigned_confirmation_appearing_in_an_ai_call_is_detected`、`test_notebook` |
+| **合言葉の登録を後回しにできる** | `./rk setup` の合言葉の段は任意。`./rk verify`・`./rk signoff` は信頼された署名者がいなければ、署名の前に登録の段(`setup.step_passphrase`)に入る | `test_v2.Deferred` |
+| **日本語と英語** | `.ryukoku/config.yml` の `manuscript_lang` と `feedback_lang`。フック・画面・`./rk`・機械の照合の文言が講評言語に従う | `test_init_export.Init.test_language_is_one_line`、`test_hooks.Hooks.test_session_start_language_and_notebook_path`、`test_round3.Misc.test_machine_commands_follow_english` |
+| **GitHub でも Git なしでも運用できる** | `templates/github/`(基準ブランチの道具で PR を検査する check.yml、PR・Issue のテンプレート、`.githooks/`)。Git なしは `rk.py bundle` の HANDOFF.md | `test_init_export.Init.test_workflows_parse_and_pin_only_checked_actions`、`test_sign.CI`、`test_init_export.Misc.test_bundle_lists_signers_and_checks` |
+| **記法の規則は学部の要項から取り出し、学生が承認したものだけを使う** | `proposals/style-rules.yml` → 画面か `./rk style` で承認(軽い確認)→ `.ryukoku/style.yml` | `test_proposals.StyleExtraction` |
+| **ローカルの HTML 画面** | `scripts/rk/notebook/`(CDN なし、127.0.0.1、Host/Origin/独自ヘッダの検査、ARIA のタブ、主張カードのタブ、由来の要約) | `test_notebook` 全体、Playwright の `tests/js/notebook.test.js` |
+| **Claude Code の Plugin として動く** | skills 24・agents 5・フック 5 種・scripts。フックは bash 3.2 の構文だけ | `bash tests/run.sh` の構文と移植性の検査、`test_init_export.Init.test_validate_strict`、`test_round3.Portability` |
+| **龍谷大学のガイドラインに沿う** | 科目条件で原稿への書き込みを変える(Ⅲ-3)、AI が書いた部分を記録して開示の事実にする(Ⅲ-4)、主張は学生(Ⅲ-1)、個人情報の送信停止(Ⅱ-2(1))、真偽の確認(Ⅱ-2(2))、`guideline-check`(Ⅳ) | `test_hooks.Prompts`・`Policy`、`test_v2.Prompts` |
+| **公開できる** | 非公式の表示、校章を使わない、ガイドラインの原文を転載しない、公開しない語を含まない、題材は記号(「現象 X」「要因 A」)だけ | `test_init_export.Init.test_no_private_terms_anywhere`・`test_no_guideline_text_copied`・`test_no_real_looking_personal_data_in_package` |
+| **文献の実在を機械で確かめ、原典が主張を支えるかは人間が確かめる** | `rklib/refcheck.py`、台帳、`sources/verification-log.jsonl`。VERIFIED は書かない | `test_research.Verifier`(実通信は `RK_NET_TESTS=1`) |
+| **調査は学生の問いに結びつき、検索ごとに記録が残る** | `rk.py search` は問いの番号が `research/questions.md` に無ければ通信せずに終了コード 2、実行のたびに記録、`--purpose counter`。WebSearch と DB の検索 URL への WebFetch もフックが自動で記録 | `test_research.Questions`、`test_hooks.Research`、eval `search-log-recorded` |
+| **研究データを保存し、後で誰でも確かめられる** | `rklib/datacheck.py`(raw は変えない、sha256 の manifest、来歴、Data Package v2)、raw への書き込みの deny | `test_hooks.PreToolUse.test_direct_writes_and_pushes_to_main`、`test_init_export.Init.test_fresh_project_passes_every_check` |
+| **数式・図・表・脚注・相互参照を書け、Word・PDF・LaTeX に書き出せる** | `templates/{ja,en}/examples/format-examples.md`、`rklib/export.py` | `test_init_export.Init.test_docx_and_latex_both_languages`、`test_round5.PandocDefaults`、`test_round6` |
 
 ## 3. 守りの仕組み
 
-### 3.1 書き込みを止める(フック)
+### 3.1 書き込みの判定(フック)
 
-- 原稿(`manuscript/`)への AI の書き込みは、どの道具でも deny に固定し、設定でも戻せない。`.ryukoku/` 全体、`tools/`・起動ファイル(`rk`・`rk.cmd`・`rk.ps1`)・Plugin 本体・`~/.ryukoku-writing`・`.claude/` と `~/.claude/`、`research/questions.md`・検索の記録・`thinking/`・`disclosure/`・`review/annotations*`・台帳・`data/raw/` も同じ。
-- 目印は対象のパス(file_path、Bash の語のうちパスらしいもの)から上へ探し、次にセッションのフォルダから上へ、無ければ一つ二つ下を探す。シンボリックリンクは解決し、`/./` と `//` を正規化し、Windows の形のパスもそろえてから照合する。セッションのフォルダがプロジェクトの中にあれば、Bash は `cd <位置>/ ;` を足した形で照合する。SessionStart は子フォルダの目印を見つけたら「開き直す」を一度だけ伝える。
-- 目印も対象のパスも見えないコマンド(別のフォルダ、glob、変数)では、利用者が使ったプロジェクトの一覧(`~/.ryukoku-writing/projects.tsv`)のすべてに窓を開き、tool_use_id で閉じる。目印を退けても、一覧にある限りフックは働く。
-- 目印が無く子フォルダにも無ければ、全フックが無出力でファイルも作らない。
-- 科目の AI 利用条件(`ai_policy`)が `prohibited` なら、Read・Grep・Glob はプロジェクトの中で path にかかわらず deny し、Bash は状態の確認(`rk check`・`status`・`facts`、`git status`・`log`)だけを通す。`limited` なら許した用途の外に確認を出す。pandoc の直接実行は、出力先が `manuscript/` の外なら原稿への書き込みではなく書き出しの用途として扱う。
-- 個人情報らしき入力は、送信前に止めて種類と行を示し、値は伏せる(照合の前に NFKC。Python が無ければ sed の表で全角の数字とハイフンの類をそろえる)。語の無い「ID: 数字」だけは誤検知とのかね合いで注意の注入にとどめる。住所は都道府県の後を伏せる。
-- 合言葉の「合言葉は …」の形と、登録した鍵が導ける短い一行(全角も)は、送信前に止める。
+- 原稿(`manuscript/`)への Write・Edit・MultiEdit・NotebookEdit は、科目の AI 利用条件で決まる: `allowed` は通す(窓を開き、PostToolUse が由来を記録する)、`limited` と `unknown` は ask、`prohibited` は deny。`.ryukoku/config.yml` が見つからない・読めない、`ai_policy` の行が 0 か 2 以上、値が四つ(小文字)のどれでもないときも deny(フックの `cfg_get` と Python の `load_config` は同じく最初の行を読み、`key :` の空白も同じに扱う。`common.config_problems` が `rk check` のエラーにする)。最後の部分がシンボリックリンクのファイルは、たどった先で判定する(`lib.sh` の `phys_file`)。理由文は、limited なら許可された用途と「シラバスで確かめる」、unknown なら「シラバスを確かめて ./rk setup で記録する」を述べる。
+- シェル(Bash・PowerShell・Monitor)からの書き込みの判定は、`execgate` の字句解析の後のパスで行う(§3.12)。原稿への書き込みは条件にかかわらず deny。理由は「Write・Edit で書く(段落ごとの由来を正確に記録し、条件の確認を通すため)」。`pre-guard.sh` の正規表現(`\` を `/` にした形と、バックスラッシュの escape を外した形の両方を見る)は早期警告で、判定の骨格ではない。
+- 知らない道具(MCP など)は、`tool_input` の中でパスに見えるすべての文字列の値(`path`・`filename`・`destination`・`target_file` など。本文を運ぶ欄は除く)を、Write と同じに判定する。
+- `.ryukoku/` 全体(由来の記録を含む)、`tools/`・起動ファイル(`rk`・`rk.cmd`・`rk.ps1`)・Plugin 本体・`~/.ryukoku-writing`・`.claude/` と `~/.claude/`、`research/questions.md`・検索の記録・`thinking/`・`disclosure/`(開示文の下書き `disclosure/statement*.md` を除く)・`review/annotations*`・台帳・`data/raw/` への AI の書き込みは、どの道具でも deny(v1 と同じ)。
+- `claims/`(主張カード)は AI が書いてよい(limited では用途 `ideas`、prohibited では deny)。`review/verification/` は用途 `review`。
+- 目印の探し方(対象のパスから上へ、セッションのフォルダ、一つ二つ下)、シンボリックリンクと `/./`・`//`・Windows の形のパスの正規化、利用者のプロジェクトの一覧による窓は v1 と同じ。
+- 科目の AI 利用条件が `prohibited` のとき: v1 は読み取りも止めたが、v2 は「検証・調査・形式の確認は可」なので、Read・Grep・Glob・読み取りのコマンド・検索・検証のサブエージェントは通し、原稿・主張カード・提案・材料の指定(`rk.py propose`・`claims new`・`provenance materials`)だけを deny にする。`limited` は v1 と同じく許した用途の外に確認を出し、用途に `ideas`(主張カード)と `draft`(材料の指定)を足した。
+- 個人情報らしき入力と、合言葉の形の入力は、送信前に止める(v1 と同じ)。
 
-### 3.2 ツールの窓の検知
+### 3.2 由来の記録と、ツールの窓の検知
 
-- 窓ごとに写し(`~/.ryukoku-writing/state/<project>/windows/<tool_use_id>.json`)を取り、PostToolUse はそれと比べる。同じ呼び出しの中で共有の基準を作り直しても隠れない。
-- 確認を求める(ask)呼び出しの窓は「保留」で、次のツール呼び出しまでに PostToolUse が来なければ(学生が断った)捨てる。学生のその後の編集を AI の変更として報告しない。
-- 検知は AI 利用記録のほかに、プロジェクトの外の控え(state の `detections-witness.jsonl` と、フックから見えるときは `${CLAUDE_PLUGIN_DATA}/witness/`)にも書く。`rk check` と SessionStart は、控えにあって記録に無い検知を NG・警告にする(記録の行を消して連鎖を作り直しても見つかる)。
-- 監視の対象: 原稿、`tools/`・`thinking/`・`disclosure/`・`.github/`・`.githooks/`・起動ファイル、`.ryukoku/config.yml`・`signers.json`・`style.yml`・`research/questions.md`、Claude Code の設定、`plugin-root`、信頼の写し、`pandoc/`、`sources/references.json`(既存の文献の著者・年の変更と削除)。`signoffs.jsonl`・`ai-use-log.jsonl`・検索の記録・`review/annotations-log.jsonl` は追記だけを許す。
-- 署名つきの記録で説明できる変更(採用した提案、戻した変更、承認した規則、画面が署名のときに追記する開示の行)は報告しない。
-- **AI が書いたファイル**: 窓の前にプロジェクトのファイルの inode・大きさ・mtime・ctime を控え、窓の後に変わったものと新しいものを、内容の SHA-256 と実際のパスで記録する。ctime は `touch -d` で戻せず、`mv`・`cp`・tar の展開は新しい inode か ctime になるので、mtime を古くしても抜けない。
+- 窓ごとに写し(`~/.ryukoku-writing/state/<project>/windows/<tool_use_id>.json` と、原稿の本文の写し `<tool_use_id>.files/`)を取り、PostToolUse はそれと比べる。同じ呼び出しの中で共有の基準を作り直しても、原稿の差分は窓の写しから取れる。
+- **原稿の変化**: 段落(空行で区切ったまとまり。front matter・コードの囲み・HTML の注釈は一つずつ、見出しは別)ごとに、`difflib` で窓の前と後を並べ、挿入・置換・削除を `ai_wrote`・`ai_edited`・`ai_deleted` として記録する(置換でも似ていなければ wrote)。材料は、段落の中の引用キー(台帳の id に直す)と、draft-writer が書く前に記録した主張カード・文献・データ・用途(`rk.py provenance materials`。2 時間で切れる)。由来の記録の前に、前回の記録から窓の前までの差を学生の編集(推定)として記録する。
+- **学生の編集**: 最後に記録した本文を、プロジェクトの外(`state/<project>/prov/files/`)に控える。窓が開いていないときのツール呼び出しの前、SessionStart、`rk check` で、控えと今の原稿を比べ、差を `student_*`・`estimated: true` として記録する。最初に見たファイルは控えるだけで、それより前の段落は「記録の開始前」になる。
+- **帰属**: 今の各段落のハッシュに当たる最新の記録を探す。AI の記録なら `ai_wrote`・`ai_edited`、学生の記録で、`from_sha` をたどった先に AI の記録があれば `student_after_ai`、なければ `student`、記録がなければ `unrecorded`。`./rk facts`・`./rk check`・画面がこれを出す。
+- 由来の記録は追記だけ(窓の中で追記でない変更は検知)、行ごとに前の行のハッシュ、この PC で最後に書いた行数と先頭を外に控える(切り詰めて作り直すと見つかる)。CI は基準ブランチの版の続きを求める。
+- 科目が `prohibited` なのに AI が書いた・直した段落が今の原稿にあれば、`rk check` は下書きで注意、PR と提出でエラー。
+- **守られているファイルの変化**は v1 と同じに検知する: AI 利用記録と、プロジェクトの外の控え(state の `detections-witness.jsonl` と、フックから見えるときは `${CLAUDE_PLUGIN_DATA}/witness/`)に書き、判断(軽い確認)まで `rk check` と CI が落ちる。監視の対象: `tools/`・`thinking/`・`disclosure/`(開示文の下書きを除く)・`.github/`・`.githooks/`・起動ファイル、`.ryukoku/config.yml`・`signers.json`・`style.yml`・`research/questions.md`、Claude Code の設定、`plugin-root`、信頼の写し、`pandoc/`、`sources/references.json`(既存の文献の著者・年の変更と削除)。`signoffs.jsonl`・`ai-use-log.jsonl`・`provenance.jsonl`・検索の記録・`review/annotations-log.jsonl` は追記だけを許す。
+- `signoffs.jsonl` への追記のうち、窓の中に現れたものは、信頼された署名者で検証できる**署名つきの記録だけ**を説明として認める。署名のない確認は学生の画面か端末で作るもので、AI のツールの実行中に現れたら検知にする。
+- `provenance.jsonl`・`ai-use-log.jsonl`・`review/annotations-log.jsonl` は、Plugin のコードが行を書くたびに、その行のハッシュをプロジェクトの外(`state/<project>/written/`)に控える(`common.note_written`)。窓の中で追記された行のうち、控えに無いもの(printf・エディタ・別のスクリプトが書いた行)は検知にする。この比較は、フックがその呼び出しの由来を書く前に行う。連鎖を保ったまま偽の行を足しても見つかる。ただし、学生が許可したスクリプトが Plugin のコードを呼んで書いた行は「Plugin が書いた行」になる(同じ利用者の権限の限界)。
+- 窓は PostToolUse が来るまで開いたままとみなす(その間の変化は AI のもの)。PostToolUse が来ないまま 6 時間を過ぎた窓だけを捨て、次の比較で見つかった変化を `"uncertain": true` で記録し、帰属では `uncertain` として AI の側に数える(事実の一覧と、禁止の科目の検査)。
+- **AI が書いたファイル**(実行の確認の強さに使う一覧)は v1 と同じ(inode・大きさ・mtime・ctime)。
+- 確認を求める(ask)呼び出しの窓は「保留」で、次のツール呼び出しまでに PostToolUse が来なければ(学生が断った)捨てる。
 
-### 3.3 署名と信頼の起点
+### 3.3 記録、署名と信頼の起点
 
-- 合言葉 → PBKDF2-HMAC-SHA256 60 万回(署名者ごとの salt)→ Ed25519 の鍵。秘密鍵のファイルは無く、`signers.json` には公開鍵・salt・回数だけを置く。Ed25519 は標準ライブラリだけの実装で、RFC 8032 の試験ベクトルと、`cryptography` があればそれとの照合で試験する。
-- 記録は (種類、対象、判断、内容のダイジェスト、detail、役割、鍵、時刻、方法、メモ) に署名し、`.ryukoku/signoffs.jsonl` に追記する。ダイジェストが変われば(署名の後に内容が変われば)無効になる。
-- 合言葉は 10 文字以上で、同じ文字の繰り返し・数字だけ・よくある語が中心のものを拒み、3 語以上か 16 文字以上を求める(簡単な下限で、強さの測定ではない)。画面の署名は誤りが 5 回でロック(30 秒から倍々)。
-- **CI の起点**: `git rev-list --max-parents=0` で根の commit がただ一つであることを確かめ(二つ以上なら何も信頼しない)、first-parent の鎖を根から辿って最初に現れた `signers.json` の署名者を起点にする(commit の日付は使わない)。その署名者が 2 人以上なら履歴の書き換えを疑い、どれも起点にしない。それ以外の鍵は、基準ブランチのものも PR やマージで入ったものも、起点から承認の鎖でつながらなければエラー。起点の指紋は CI の出力の先頭に出す。PR の作業ツリーの署名者は、最初の PR でも信頼しない。
-- **Git なし**: 信頼の起点は `~/.ryukoku-writing/trust/<project>.json` で、端末の `./rk setup`・`./rk trust` だけが書く。起点の印の無い署名者は承認が要る。スクリプトが `register()` を呼んで足した署名者は「未承認の署名者の追加」になる。
-- **失効と引き継ぎ**: 失効した鍵の承認は、時刻にかかわらず無効。例外は、失効の記録(失効させる鍵自身で署名した `successor`)が名指しする一つの鍵だけ。`./rk setup` で「知られた可能性がある」を選ぶと、今の合言葉で新しい鍵を承認し、続けて今までの鍵を失効させ、引き継ぎ先として新しい鍵を書く。忘れたときは承認できないので、新しい鍵自身が署名した起点の変更を `.ryukoku/root-changes.jsonl` に書き、CI は基準ブランチにあるその記録の鍵も起点に加え、「起点が変わった」と新しい指紋を出力の先頭に出す。**起点の変更を誰がしたかを道具は区別できない**ので、指導教員が学生と会って指紋を照らすことを前提にした。
-- **main への push**: pre-push は端末での `yes` を求める(環境変数による抜け道は無い。AI のスクリプトが設定できるため)。フックは AI の main への push を deny、それ以外の push を ask にする。
-- **道具と CI の変更**: `tools/`・起動ファイル・`.github/`・`.githooks/` が Plugin の同梱版(ローカル)か基準ブランチ(CI)と違えば、学生の `guarded` の署名が無い限り検査を通さない。CI は `git worktree add --detach .rk-base origin/<base>` の道具で PR を検査するので、PR の中で検査のコードを無効にしても基準の道具が落とす。
+- 記録は (種類、対象、判断、内容のダイジェスト、detail、役割、鍵、時刻、方法、メモ) で、`.ryukoku/signoffs.jsonl` に追記する。ダイジェストが変われば(記録の後に内容が変われば)無効になる。
+- **署名つき**(VERIFIED・最終確認): 合言葉 → PBKDF2-HMAC-SHA256 60 万回(署名者ごとの salt)→ Ed25519 の鍵。秘密鍵のファイルは無く、`signers.json` には公開鍵・salt・回数だけを置く。Ed25519 は標準ライブラリだけの実装で、RFC 8032 の試験ベクトルと、`cryptography` があればそれとの照合で試験する。最終確認のダイジェストは、原稿・台帳・記法・主張カードのハッシュ、由来の帰属の要約、開示文(`disclosure/statement*.md`)、チェックリストを覆う。
+- **軽い確認**(ほかのすべて): `sig` は空、id は記録の内容のハッシュ(`CF-…`)、方法は `tty` か `notebook`。署名が要る判断を名乗る軽い確認、id が内容と合わない確認は `rk check` のエラー。名前は `./rk setup` で決めた呼び名(`student_name`)。
+- 合言葉は 10 文字以上で、同じ文字の繰り返し・数字だけ・よくある語が中心のものを拒み、3 語以上か 16 文字以上を求める。画面の署名は誤りが 5 回でロック(30 秒から倍々)。
+- **CI の起点**、**Git なし**、**失効と引き継ぎ**、**main への push**、**道具と CI の変更**は v1 と同じ(根の commit がただ一つ、first-parent の最初の `signers.json` の署名者、失効した鍵の承認は引き継ぎ先だけ、起点の変更は指導教員が指紋を照らす前提、pre-push は端末での `yes`、PR の道具の変更は `guarded` の確認がなければ落ちる。v2 で `guarded` は軽い確認になった)。合言葉を後で登録したときは、最初の commit に `signers.json` が無いので、最初に現れた `signers.json` の commit が起点になる(setup がそう案内する)。
 
-### 3.4 合言葉を受け取るコードの確認
+### 3.4 合言葉を受け取るコードの確認(v1 と同じ)
 
 - `./rk` の起動ファイルは全プロジェクトで同じ固定の内容で、Plugin の場所はプロジェクトの外(`~/.ryukoku-writing/plugin-root`)から読む。これは間接参照であり、同じ利用者のプログラムは書き換えられる。
 - SessionStart(Claude Code から受け取る `CLAUDE_PLUGIN_ROOT`)と初期化が `plugin-root` を書き、`plugin-root.log` に場所・MANIFEST の要約・版を追記する。`plugin-root` が最後の記録と違えば(Claude Code の外で書き換えられた)、検知として AI 利用記録に残し、学生に伝えてから戻す。
 - 人間用のコマンドと画面は、合言葉を求める前に場所と版を出し、自分の場所と MANIFEST の要約が最後の記録と同じか、同梱の MANIFEST と食い違いがないかを確かめ、違えば止まる。自分のコードがプロジェクトの中(`tools/`)にあれば動かない。端末の操作は本物の端末(/dev/tty)でだけ動く。
-- 証拠ノートの起動の判定は basename ではなく実際のパスで行う。改名した写しや mtime を古くした写しは Plugin の外のコードとして ask(引数に `notebook` があれば deny)。背景(run_in_background)でも同じ照合をする。
+- 証拠ノートの起動の判定は basename ではなく実際のパスで行う。v2 では `notebook` は人間専用のコマンドで、AI が起動する形は、Plugin のコードからでも deny(§3.12)。
 
-### 3.5 確認なしで実行してよいコマンド(許可リスト)
+### 3.5 確認なしで実行してよいコマンド(許可リスト。v1 と同じ)
 
 `rklib/execgate.py` は bash の一部を真似た字句解析をする(一重・二重引用符、バックスラッシュ、行の継続、改行と `;` は区切り、`#` の注釈は語の頭だけで改行まで)。コマンド置換・バッククォート・プロセス置換・ヒアドキュメント・here-string・`$'…'`、括弧と波括弧(サブシェル・まとまり・関数の定義)、`case` は解析せず ask にする。単純なコマンドごとに次のどちらかなら確認なしで通し、それ以外は ask。
 
@@ -95,7 +107,7 @@
 
 理由文はコマンドを名指しし「Plugin の外のコードやコマンドを実行しうる」と書く。インタプリタで Plugin の外のコードを動かすときは「合言葉を入れる画面や端末を偽れる」、AI が書いた・変えたファイルを名指しするときはより強い文面にする。照合の道具が失敗したとき(最後の行 `scanned` が無い)と Python が無いときも ask(閉じる側に倒す)。保護したパスへの書き込みの deny は ask より先に判定する。`claude plugin|config|mcp|update|install` は deny。
 
-### 3.6 提案の不変の検査(許可リスト)
+### 3.6 提案の不変の検査(許可リスト。v1 と同じ。提案ファイルは v2 では任意の経路)
 
 `rklib/proposals.py` は、両方の行を許可した変換だけで正規形にし、行の数も含めて一字ずつ等しいときだけ通す。作成時と適用時の二度検査する。
 
@@ -106,44 +118,66 @@
 - diagram は front matter の設定行の追加・削除だけで、図の行は一字も変えない。
 - NFKC 全体は使わない(㍻→平成、½→12、²→2 のような互換分解を通さないため)。見えない文字・形の似た別の文字は正規形に残るので、足せば必ず違いになる。
 
-### 3.7 プロジェクトの外への書き込み
+### 3.7 プロジェクトの外への書き込み(v1 と同じ)
 
 シェルの起動ファイル(`.bashrc`・`.profile`・`.zshrc`・`.zshenv` ほか、fish・PowerShell のプロファイル)、PATH 上のディレクトリと `~/.local/bin`・`~/bin`、自動起動(`~/.config/autostart`・`~/.config/systemd/user`・LaunchAgents)、`.envrc`、`.vscode/`、`.git/`・`.git` という名のファイル・`~/.gitconfig`・`~/.config/git/`・site-packages・`sitecustomize.py`・`usercustomize.py`・`.pth` への書き込みは、Write・Edit・Bash のすべてで deny。内容が Git や Python の設定の形(`[core]`・`[filter`・`fsmonitor`・`textconv`・`pager`・`sshCommand` など)の Write は場所を問わず ask。これら以外のプロジェクトの外への AI の書き込みは ask(セッションの一時ディレクトリ `$TMPDIR`・`/tmp` は除く。ただしプロジェクト自身がそこにある場合は除外しない)。`./rk` の起動ファイルは PATH から python を探すので、`~/.local/bin/python3` の差し替えを防ぐのが要点である。
 
-### 3.8 Claude Code の設定
+### 3.8 Claude Code の設定(v1 と同じ)
 
 `.claude/` と `~/.claude/` への書き込みは全ツールで deny。`./rk check`・SessionStart・人間の段の最初の検査(`./rk setup` を含む)・CI は、`disableAllHooks: true` と、`enabledPlugins` でこの Plugin が false のものをエラーにする(`enabledPlugins` の書式は、`claude plugin disable` が `~/.claude/settings.json` に書いた内容で確かめた。開発時の観察)。削除の場合は設定が残らないので、`./rk check` は最後の SessionStart の記録の日付を出す。
 
 ### 3.9 コメントと追記だけの記録
 
-すべてのコメントと返信に経路(`notebook` = 画面で入力・署名なし、`tty` = 端末の取り込み・署名あり、`agent-cli` = AI の道具)を記録して表示する。AI の道具からは必ず AI の名義で、確度は「要確認」。画面の API からのコメントは学生の名義だけ(指導教員の名義は 403。保管の層でも、指導教員の名義は端末の取り込みだけ)、表示と `annot list` に「本人確認なし」。作成・返信・解決・再オープンは `review/annotations-log.jsonl` に追記し(道具はコメントを消さない)、記録にあって annotations.json に無いコメントは `rk check` の NG。AI のコメントに書き換えの文の欄は無い。
+すべてのコメントと返信に経路(`notebook` = 画面で入力・本人確認なし、`tty` = 端末の取り込み、`agent-cli` = AI の道具)を記録して表示する。AI の道具からは必ず AI の名義で、確度は「要確認」。画面の API からのコメントは学生の名義だけ(指導教員の名義は 403。保管の層でも、指導教員の名義は端末の取り込みだけ)、表示と `annot list` に「本人確認なし」。作成・返信・解決・再オープンは `review/annotations-log.jsonl` に追記し(道具はコメントを消さない)、記録にあって annotations.json に無いコメントは `rk check` の NG。AI のコメントに書き換えの文の欄は無い。
 
-### 3.10 一括の署名
+### 3.10 一括の記録
 
-鍵を作る前に、採用する hunk を原稿ごとに順に記憶の中で当て、位置を特定できないもの(原稿が変わった、同じ一括の別の提案が同じ行を変えた)と、同じ一括で採用する提案が変える節の署名を「署名しない」に分け、理由をつけて返す。結果は項目ごと(署名した・しなかった・失敗・未処理)で、画面は署名した項目を一覧から外す。位置を特定できない提案は一覧で「作り直しが要る」と出し、不採用しか選べない。
+鍵を作る前に(署名が要る項目があるときだけ鍵を作る)、採用する hunk を原稿ごとに順に記憶の中で当て、位置を特定できないもの(原稿が変わった、同じ一括の別の提案が同じ行を変えた)と、同じ一括で採用する提案が変える節の確認を「記録しない」に分け、理由をつけて返す。結果は項目ごと(記録した・しなかった・失敗・未処理)で、画面は記録した項目を一覧から外す。位置を特定できない提案は一覧で「作り直しが要る」と出し、不採用しか選べない。
+
+### 3.11 主張カードと検証の機械の部分
+
+- 主張カードの形式は `rklib/claimcards.py` が読む(節の名前は日英どちらでもよい)。確認のダイジェストは、主張・範囲・学生の言葉の原文と、`[ai_suggested]` の印のないすべての要素を覆う。AI の候補を書き換えても確認は古くならないが、印を外して学生の要素に見せかけると古くなる。学生の言葉の原文に印があるもの、主張そのものに印があるものは形式の誤り。
+- 機械の照合(`rklib/verification.py`)は判断ではなく候補で、claim-verifier が一件ずつ残すか退けるかを理由つきで書く:
+  - **すり替えの候補**(AI が書いた段落と、その材料の主張カード): カードにない強める語(「必ず」「唯一」「all」「prove」など)、カードの限定の語(「一因」「可能性」「may」など)が段落にない、増減の向きの語が逆、カードの範囲の数字・年が段落にない。すべて「致命」の候補。材料の主張カードが無い、確認されていない、記録されていない場合も出す。
+  - **根拠の対応**: 段落の引用キーごとに台帳の状態(IDENTITY_CONFIRMED 未満は「重要」、台帳にないものも「重要」)、保存した抜粋(`excerpts/` の 1 行目 `source_id:`)の有無(無ければ「未照合」)。AI が書いた段落の、引用もデータの参照もない断定的な事実の文(数字か事実の語があり、意見・限定の語がない文)は「重要」。
+  - **出典のない数字**: 単位つきの数(%・割・倍・人・件・円・万・億など)と小数で、段落にも脚注にも引用・`data/raw|processed/…` の参照がなく、`data/numeric-claims.csv` にも無いもの(検証では「軽微」。`rk check` では下書きで注意、提出の段階でエラー。`lint` は一覧に出す)。
+- 検証のファイルの形の検査(`verification lint`): 指摘の行の重大度(致命・重要・軽微、fatal・major・minor)、観点(論理・根拠の対応・反証・新規性・すり替え、または taxonomy のコード)、`/ 根拠:` の有無。「支える」と書いた行は `excerpts/` を根拠に示すこと。4 節で新規性を断定していれば、検索の範囲の明記を求める。0 節に致命の候補があるのに 5 節が空なら注意。3 節は `--purpose counter` の検索記録の id か「検索していない」を求める(注意)。
+- 書き込みの直後(PostToolUse)に、変わったファイルの機械の照合を最大 12 行まで文脈として返す。Stop のフックは、そのターンに原稿への書き込みがあり、検証やサブエージェントを使っていなければ、一度だけ結果を学生に示すよう促す。
+
+### 3.12 v2 の独立検証の指摘への対応
+
+v2 の後の敵対的な検証で見つかった欠陥と、その閉じ方。再現は `tests/test_v2.Hardening` にある。
+
+- **シェルの書き込みの判定を、解析した後のパスで行う。** `echo x >> man\uscript/main.md`(bash は `manuscript/main.md` と読む)、`cd m?nuscript && echo … >> main.md`、`cd .r?ukoku && echo … >> signoffs.jsonl`、`cd .[r]yukoku`、`cd th?nking`、`cd res?arch && echo x > q\uestions.md` が確認なしで通っていた。原因は、`execgate` が glob を含む `cd` の行き先を追わずに「プロジェクトの中へのリダイレクト」を許していたことと、`pre-guard.sh` が `\` を `/` に置き換えた文字列に正規表現をかけていたこと。修正の後は: `cd` の glob は bash と同じに展開し、ちょうど一つのディレクトリに当たれば追う。変数・`cd -`・解けない glob の `cd` の後は「行き先不明」とし、その後の相対の書き込み先は不明(確認。`prohibited` と、記録のファイルの名前なら deny)、相対パスのコードの実行は確認にする。リダイレクトと書き込みのコマンド(`cp`・`mv`・`tee`・`rm`・`ln`・`sed -i`・`pandoc -o` など)の書き込み先を、字句解析で解いた後に `rklib/paths.py`(`lib.sh` の `path_class` と同じ分類。試験が一致を確かめる)で分類し、守られた場所なら `protected_write` としてフックが deny する。
+- **AI のツールの実行中の、追記の形の偽造を見つける**(§3.2)。
+- **証拠ノートの鍵。** 画面の API に鍵が無く、`/api/view` の表示の証を読めば誰でも軽い確認を記録できた。修正の後は、サーバーが起動のたびに鍵を作り、`/api/` のすべての要求に `X-RK-Session` の一致を求める。鍵はどの API も返さず、標準出力にもファイルにも書かず、学生の端末(`/dev/tty`)にだけ URL の断片 `#k=…` として出す(ブラウザは断片をサーバーに送らない)。画面はそれを sessionStorage に置き、アドレス欄から消す。端末の無いところ(AI のツールの呼び出し)では、サーバーは起動を断る。このため、画面は学生が `./rk notebook` で開くものになった(最初の v2 では AI が起動していた)。フックは、ループバック(`127.x`・`localhost`・`[::1]`・`0x7f000001`・`2130706433` など)の `/api/` への呼び出しと、`nc` などでのループバックへの接続も deny する。限界: 同じ利用者の権限で動くプログラムは、端末の出力やブラウザの保存域から鍵を読める、または自分でサーバーを立てて記録を書ける(学生が許可した実行は何でもできる)。鍵が止めるのは、確認なしで通るコマンドからの要求である。
+- **人間専用のコマンドの一覧を一つにする。** `scripts/rk/human-commands.txt` を、`rk.py`・`execgate`・`pre-guard.sh`(Python が無いときの文字列の照合)が読む。`--project P confirm` のように、サブコマンドの前にオプションがある形も照合する。
+- **引用の取り出し**: `@{key}`・`nocite` を読み、提出の段階の検査と書き出しで、出る参考文献のすべてに台帳と IDENTITY_CONFIRMED を求める。最初の v2 にあった「原典を読んだ署名とメモがあれば注意に下げる」逃げ道は、指示に合わせて外した(識別子の無い資料は識別子を足すか、引けない)。`sources/references.json` への AI の書き込みは、`prohibited` で deny、`limited` で用途 `verify` の外なら確認。
+- **数字**: 提出の段階でエラーにした。数えるのは単位つきの数(%・割・倍・人・件・円・万・億・兆・社・校・時間・点・ドル・percent・million・billion)と小数で、年・`第 N 章`・`3.2 節`・版の番号(`v1.2`・`2.0.0`)・頁の範囲・URL とコードの中の数は数えない。出典の示し方は、同じ段落か脚注の引用、`data/raw|processed/…` への参照、`data/numeric-claims.csv` への登録のどれか。
 
 ## 4. 脅威モデルと限界
 
 | 相手 | 例 | この Plugin で |
 |---|---|---|
-| 取り違え・事故 | 「句読点を直して」で AI が原稿を書き換える。台帳を VERIFIED にする | フックが止める。署名が無いので検査が落ちる |
-| 指示に従った回り道 | 変数の連結・base64・スクリプトのファイル・シンボリックリンク・patch・tar で原稿や問いを書く | 事前の照合は外れうる。多くは許可リストの外なので実行の前に確認が出る。許可されても窓の検知が拾い、連鎖の記録に残り、署名で判断するまで検査と CI が落ちる |
-| 人間の確認の偽造 | スクリプトで署名者を足して署名する、PR で検査のコードを無効にする | 信頼されない署名者は落ちる(ローカル・CI)。CI は基準ブランチの道具で検査する |
-| 合言葉の横取り | 合言葉を受け取るコードの差し替え、`plugin-root` の書き換え、偽の画面 | **Plugin のコードが動いている限り**、合言葉を求める前に場所と版を出し、Claude Code が記録した場所・MANIFEST と照らし、違えば止める。行き先の書き換えは、フックの deny、許可リストの外の実行の ask、窓の検知(`plugin-root` を監視)、次の SessionStart の照合(検知に残して戻す)で、起こりにくく・残るようにした。**偽のコード自身はこの確認をしないので、同じ利用者の権限のプログラムには止められない** |
-| 同じ利用者の権限のプログラム(AI が書いて学生が実行を許したものを含む) | Plugin の写しと MANIFEST を作る、信頼の起点・検知の基準・控え・連鎖を作り直す、`disableAllHooks` を書く、ツールの外で後から書き込む | **止められない。** AI が書いたコードは実行の前に確認を求め、フックの拒否・変更の検知・二つ目の控え・設定の検査で痕跡を残す。GitHub の運用では信頼の起点が基準ブランチの最初の署名者にあり、利用者の PC の信頼の起点に依存しない。節の署名の画面は前回の署名からの差分を見せる |
-| 合言葉の漏えい | 学生がチャットに合言葉を書く、他人に知られる | 「合言葉は …」の形と登録した鍵が導ける短い一行は送信前に止める(それ以外の形は止められないことがある)。漏れたら `./rk setup` で新しい鍵を登録し、今までの鍵を失効させる。ただし記録の時刻は署名者が書くので、漏れた合言葉で時刻をさかのぼった記録は作れる(GitHub では基準ブランチに入った記録の後ろへの追記として見える) |
-| オフラインの総当たり | 公開鍵と salt から合言葉を推測する | PBKDF2 60 万回で遅くし、合言葉の下限を設ける(強さの保証ではない) |
-| 学生自身 | 読まずに署名する | 止めない。署名は「読んで確かめた」という宣言で、画面は表示した項目にしか判断を選ばせない |
+| 取り違え・事故 | 科目が禁止なのに AI が原稿を書く。台帳を VERIFIED にする | 原稿は科目の条件でフックが止め(シェルの書き込みは解析した後のパスで判定)、すり抜けた書き込みも由来に残って検査が落ちる。署名のない VERIFIED は検査が落ちる |
+| 主張のすり替え | AI の文が学生の主張より強い・広い・逆を言う | 材料の主張カードと照らす機械の照合が「致命」の候補を出し、claim-verifier が確かめる。**語の一覧による候補で、言い換えた強調は漏れる** |
+| 捏造 | 記憶から文献・数字を足す | 材料の指定は台帳とデータにあるものだけ。台帳にない・未確認の引用は提出の段階で落ちる。出典のない数字は注意。**台帳に入った実在の文献を、支えない主張に引くこと**は、抜粋があれば照合できるが、抜粋が無ければ「未照合」までしか言えない |
+| 指示に従った回り道 | 変数の連結・base64・スクリプトのファイル・patch・tar で原稿や記録を書く | 原稿なら由来に残る(禁止の科目では検査が落ちる)。記録・道具なら検知に残り、判断まで検査と CI が落ちる。多くは許可リストの外なので実行の前に確認が出る |
+| 人間の確認の偽造 | スクリプトで署名者を足して署名する、確認の記録を書く、PR で検査のコードを無効にする | 信頼されない署名者は落ちる(ローカル・CI)。AI の窓の中に現れた確認は検知。CI は基準ブランチの道具で検査する。**窓の外で、学生が許したプログラムが書いた軽い確認は区別できない** |
+| 合言葉の横取り | 合言葉を受け取るコードの差し替え、`plugin-root` の書き換え、偽の画面 | v1 と同じ(場所と版を出し、記録と MANIFEST に照らす。偽のコード自身はこの確認をしないので、同じ利用者の権限のプログラムには止められない) |
+| 同じ利用者の権限のプログラム | Plugin の写しと MANIFEST を作る、信頼の起点・控え・連鎖を作り直す、`disableAllHooks` を書く、ツールの外で後から書き込む | **止められない。** 痕跡を残す。ツールの外の書き込みは学生の編集(推定)として由来に残る |
+| 合言葉の漏えい・総当たり | v1 と同じ | v1 と同じ |
+| 学生自身 | 読まずに確認・署名する。AI の文を読まずに出す | 止めない。由来の記録と開示文が事実を残し、最終確認の画面は由来と開示文を見せる |
 
 その他の限界:
-- ツールの窓の検知は、AI のツールが動いている間に学生がエディタで保存した変更も「検知」に出す(誤検知)。学生は「自分の編集だった」を選んで署名する。許可されて長く動いている呼び出しの間に別の呼び出しが来ると、その窓の写しは残るが、共有の基準はその時点で作り直される。
-- 実行の照合は許可リストなので、AI が書いたファイルの一覧は理由文の強さだけに使う。許可リストのコマンドが、学生の環境(環境変数、`~/.gitconfig` などの設定)を通して別のプログラムを動かす経路は、設定ファイルへの AI の書き込みを deny にすることで狭めたが、学生が自分で置いた設定は照合しない。設定を読む道具すべてを網羅したとは言い切れない。学生が確認で許可した実行は何でもできる。
-- make・npm の scripts・Git のフックなど、間接に実行される設定は照合しない。
-- Claude Code の設定でフックが止まっている間は、何も止めず記録もしない。後で検査が設定を見つけるが、止まっていた間の出来事は分からない。
-- GitHub の `pull_request` のワークフローが PR の側で書き換えた定義で動くかは未確認(独立検証では、GitHub の一般的な仕様では PR の定義が動くと指摘された)。README では、PR が `.github/` を変えるときはその PR の CI を信用しないよう書いた。
-- 代筆・問いの代行の依頼の検知は語彙による補助で、言い回しを変えると漏れる。最後の歯止めは、AI が原稿と問いに書けない仕組みである。
-- `./rk` の起動ファイルは PATH から python を探す。setup で実パスを記録する設計は採らず、PATH 上と起動ファイルへの書き込みを両方止めることで主な経路を塞いだ。
-- Windows では /dev/tty が無いので、人間用のコマンドは isatty に頼る(弱い)。Git Bash(mintty)上の Windows の Python で isatty が偽になる可能性は未確認。
+- 由来の記録は、フックの強さまでのものである。フックが止まっている間、フックの外で動くプログラム、学生が許可したプログラムの書き込みは、記録が誤るか残らない。学生が許可したプログラムは学生の権限で何でもできる(記録を作り直す、Plugin のコードを呼んで「Plugin が書いた行」にする、画面の鍵を読む)。
+- 学生の編集の帰属は推定である。AI のツールが動いている間に学生がエディタで保存した変更は、AI の書き込みとして記録される(v1 では誤検知の警報だった。v2 では記録が誤る)。逆に、ツールの外の書き込みは学生の編集に見える。
+- 段落の対応は、空行で区切ったまとまりの並びの比較による。段落を分けたり合わせたりすると、記録の上では削除と挿入になる。
+- 実行の照合は許可リストなので、AI が書いたファイルの一覧は理由文の強さだけに使う。make・npm の scripts・Git のフックなど、間接に実行される設定は照合しない。
+- Claude Code の設定でフックが止まっている間は、何も止めず記録もしない。後で検査が設定を見つけるが、止まっていた間の出来事は分からない(由来も残らない)。
+- GitHub の `pull_request` のワークフローが PR の側で書き換えた定義で動くかは未確認。
+- 執筆の依頼や問いの代行の依頼の検知は語彙による補助で、言い回しを変えると漏れる。
+- Windows では /dev/tty が無いので、人間用のコマンドは isatty に頼る(弱い)。
 
 ## 5. 外部のプログラム: 何を読み、どう閉じたか
 
@@ -161,28 +195,32 @@
 
 ## 6. 主な設計の選択と、採らなかった案
 
-採ったもの:
-- **人間の判断は合言葉から毎回導く鍵の署名にする。** 秘密をディスクに置かないので、ファイルを読める AI にも偽造できない。端末の /dev/tty は、秘密に頼らない段差としてだけ残した。
-- **提案と実行の照合は、どちらも拒否リストでなく許可リストにする。** 危険な形を列挙する方式は、独立検証で数値・不等号・矢印・頁の変更や、`find -exec`・`cp` の後の実行・`PYTHONPATH`・`BASH_ENV`・注釈の後の改行などで簡単に抜けた。
-- **原稿への AI の書き込みは deny に固定する。** 確認(ask)で許す形では、学生が内容を見ずに許可を押せば AI の文が入る。設定でも戻せない。
-- **信頼の起点と検知の基準はプロジェクトの外(`~/.ryukoku-writing`、`RK_STATE_HOME` で変更可)に置く。** プロジェクトの中に置くと、AI が消せる。
+v2 で採ったもの:
+- **原稿への書き込みは科目の条件で決め、書き込みは記録にする。** 一律の deny は学生を縛り、ask だけでは何が書かれたかが残らない。allowed は通して由来を残し、limited と unknown は書く前に確かめさせ、prohibited は止める。
+- **シェルからの原稿への書き込みは、条件にかかわらず止める。** Write・Edit なら書く前に対象が分かり、科目の条件の確認と段落の差分が確実に働く。シェルの書き込みは事前に読み切れない。すり抜けたものは由来に残す。
+- **原稿の変化は検知でなく由来にする。** v1 では「AI の変更」はすべて警報で、学生が署名して判断するまで検査が落ちた。v2 では AI が書いてよい場所なので、警報は学生の手間を増やすだけで、守るものがない。代わりに段落ごとに残して開示の事実にする。禁止の科目でだけ検査に結びつける。
+- **署名は VERIFIED と最終確認の二つに絞る。** 偽れば未確認の文献が確認済みとして通る(VERIFIED)、提出物と開示が正しいという宣言が成り立たない(最終確認)、の二つだけを、AI が装えない署名にした。ほかは v1 のフックと窓の検知で十分に守れ、署名の手間に見合わない。
+- **主張カードの「学生の確認」は、記録を正とし、ファイルの表示は従とする。** ファイルの `status` は AI が書ける場所にあるので、記録と食い違えばエラーにする。
+- **機械の照合は候補を出すだけにし、判断は検証の文に任せる。** 語の一覧で主張のすり替えを判定すると、誤検知と見逃しの両方が多い。致命の候補として必ず目に入れ、claim-verifier に一件ずつ理由つきで扱わせる。
+- **材料の指定は書き込みの前に道具で記録する。** 原稿の中に印を埋め込む案は、提出物を汚し、学生が消すと由来が切れる。道具の記録なら、確認されていないカードや台帳にない文献を材料にしようとした時点で止められる。
+- **学生の編集は差分から推定し、推定と書く。** 本人の編集を確かめる手段はない。確かめたふりをしない。
+
+v1 から引き継いだもの(理由は v1 と同じ):
+- 提案と実行の照合は、どちらも拒否リストでなく許可リストにする。
+- 信頼の起点と検知の基準はプロジェクトの外(`~/.ryukoku-writing`、`RK_STATE_HOME` で変更可)に置く。
+- 一括の採用・却下の操作は置かない(各項目は表示してからでないと選べない)。
+- 起動ファイルに Plugin の場所を書き込まない。Claude Code の Plugin の一覧のファイルに依存しない。
 
 採らなかった案と理由:
-- **確認コードや HMAC、画面の PIN と Cookie を人間の状態の裏づけにする**: 秘密がディスクにあり、ファイルを読める AI が偽造できる。画面の PIN は、AI が画面を起動するとき AI の標準出力に出るか、端末が無くて作れない。署名ごとに合言葉が要るので、PIN は守りを足さない。署名の無い書き込みは、コメント・返信・再オープン・検索記録の理由だけにした。
-- **一括の採用・却下(残りを全部採用するキー、番号の範囲や all で選ぶ、画面の全選択)**: 一件ずつの確認を飛ばせる。各項目は表示してからでないと選べないことにした。
-- **`${CLAUDE_PLUGIN_DATA}` に信頼の起点と基準を置く**: 学生の端末と AI の Bash からはこの変数が見えなかった(`claude -p` で `env | grep -c CLAUDE_PLUGIN_DATA` が 0。開発時の観察)。同じ場所を三者が使えるよう `~/.ryukoku-writing` にした。フックからは見えるので、検知の控えの「二つ目」としてそこにも書く。
-- **Claude Code の Plugin の一覧のファイルと照らす**: Claude Code の内部のファイルの形に依存しないことにした(開発した環境にはそのファイルが無かった)。代わりに SessionStart のフックが受け取る `CLAUDE_PLUGIN_ROOT` を記録し、人間用のコードはそれと照らす。
-- **画面と端末に、setup で決めた「合図の語」を出す**: 偽の画面は本物の画面の文言を写せる(同じ利用者の権限で Plugin のファイルを読める)ので、合図の語は偽物と本物を分けない。動いているコードの場所と版を出して照らすことにした。
-- **起動ファイルに Plugin の場所を書き込む**: Plugin の更新で場所が変わり、commit された起動ファイルが PR の差分になる。場所はプロジェクトの外のファイルから読む。
-- **PR の中の `tools/` の変更を指導教員のラベルで通す**: GitHub のラベルの条件の書き方を一次資料で確かめていない(未確認)。道具の更新は main で `./rk update-tools` に限った。
-- **内容の修正案を提案ファイルにする**: 採用すれば AI の文が本文に入る(ガイドラインⅢ-4)。表記の揺れ(漢字とかな)も語の変更なので提案にしない。
-- **Mermaid の timeline 図**: 構文を一次資料で確かめていない(未確認)。年表は flowchart で書いた。
-- **ISBN-10 の検査、JaLC の API、NDL の isbn 索引**: 一次資料・実際の動作で確かめていない(未確認)ので実装しない。
-- **gh でリポジトリを作る自動化**: gh のフラグを一次資料で確かめていない。`./rk setup` は手順を示すだけにした。
-- **`cp manuscript/… build/…` の deny を緩める**(独立検証で誤検知と指摘された): Bash のコマンドに原稿のパスと書き込み系の操作が並ぶ形を止める規則によるもので、緩めない。原稿を読むには Read を使い、書き出しは `export` を使う。
-- **git を初期化していないプロジェクトで `git status` を確認なしで通す**: 使うリポジトリがプロジェクトの `.git` のときだけ通す判定の結果で、確認が出るのは意図どおり。
-- **起動ファイルが python を見つける方法の見直し(setup で実パスを記録)**: PATH 上と起動ファイルへの書き込みを両方止めれば主な経路は塞がるため、この版では採らず、限界として README に残した。
-- **全角・半角の照合に NFKC 全体を使う**: 互換分解で内容が変わる(㍻→平成、½→12)。許可した変換だけを個別に書いた。
+- **すべての判断を署名のままにする**: v1 の形。手間が大きく、学生が読まずに署名する方向に働く。守るものの大きさで分けた。
+- **原稿への書き込みを常に ask にする**: 毎回の確認は読まずに押されやすい。科目が allowed と記録されていれば、確認の代わりに記録を残すほうが正直である。
+- **すり替えを道具で断定してエラーにする**: 語の一覧では誤りが多く、正しい文を書けなくなる。候補として出し、検証で扱う。
+- **由来の記録に段落の本文を入れる**: 公開リポジトリに原稿の写しが二重に残る。ハッシュと行の範囲だけにした(本文の控えはプロジェクトの外)。
+- **学生の編集を AI の窓の外のすべての変化として断定する**: 区別できないので、推定として記録する。
+- **確認コードや HMAC、画面の PIN と Cookie を軽い確認の裏づけにする**: 秘密がディスクにあり、ファイルを読める AI が偽造できる。守りを足さずに手間だけが増える(v1 の判断と同じ)。
+- **prohibited で読み取りも止める**(v1): 検証と形式の確認ができなくなる。v2 の指示(検証・調査・形式の確認は可)に合わせた。
+- **Mermaid の timeline 図、ISBN-10 の検査、JaLC の API、NDL の isbn 索引、gh でリポジトリを作る自動化**: v1 と同じく、一次資料・実際の動作で確かめていない(未確認)ので実装しない。
+- **全角・半角の照合に NFKC 全体を使う**: 互換分解で内容が変わる(㍻→平成、½→12)。
 
 ## 7. 事実の出典
 
@@ -223,9 +261,9 @@
 | 日本語の CSL(SIST02) | https://github.com/citation-style-language/styles/blob/master/sist02.csl |
 | Data Package v2、公共データ利用規約(第1.0版、2024-07-05) | https://datapackage.org/standard/data-package/ 、https://www.digital.go.jp/resources/open_data/public_data_license_v1.0 |
 | W3C Web Annotation の TextQuoteSelector と TextPositionSelector | https://www.w3.org/TR/annotation-model/ |
-| レビューのコメントの層(Toulmin の配置、受容可能性・関連性・十分性)、誤謬名は判定でなく問いの見出し、事例選択の偏り | SEP「Informal Logic」https://plato.stanford.edu/entries/logic-informal/ 、IEP「Fallacies」https://iep.utm.edu/fallacy/ 、Geddes 1990, Political Analysis 2:131-150, DOI 10.1093/pan/2.1.131 。コード・ラベル・問いは作成者の言い換えで、試行も評定者間の一致の確認もしていない |
+| レビューと検証の観点(Toulmin の配置、受容可能性・関連性・十分性)、誤謬名は判定でなく問いの見出し、事例選択の偏り(結果に基づく選択) | SEP「Informal Logic」https://plato.stanford.edu/entries/logic-informal/ 、IEP「Fallacies」https://iep.utm.edu/fallacy/ 、Geddes 1990, Political Analysis 2:131-150, DOI 10.1093/pan/2.1.131 。コード・ラベル・問いは作成者の言い換えで、試行も評定者間の一致の確認もしていない |
 | 効くのは誤りとその理由を示し探索の方向を与えるフィードバック | Wisniewski, Zierer & Hattie 2020, Frontiers in Psychology 10:3087, DOI 10.3389/fpsyg.2019.03087 |
 | 査読者は著者の論文を自分の好む書き方に書き直そうとしない | COPE, Ethical Guidelines for Peer Reviewers(2013)、DOI 10.24318/cope.2019.1.9 |
 | APA・MLA の AI の利用の書き方 | APA「AI Contribution Statement Guide」https://apastyle.apa.org/instructional-aids/ai-contribution-statement.pdf 、MLA「Citing generative AI (updated and revised)」https://style.mla.org/citing-generative-ai-updated-revised/ 。Chicago は読めず未確認 |
 | 開発時の観察(Claude Code 2.1.318、この環境) | Claude Code の Bash から `CLAUDE_PLUGIN_DATA`・`CLAUDE_PLUGIN_ROOT` が見えない。`claude -p` の SessionStart に model が来ない(model は transcript から読む)。eval で Bash を許すと、bubblewrap と socat が無いため実行が拒否される。`claude plugin disable` が `~/.claude/settings.json` に `"enabledPlugins": {"<plugin>@<marketplace>": false}` を書く(一時の HOME で観察)。`.claude/settings.local.json` の `disableAllHooks: true` で Plugin のフックが止まる(独立検証で `claude -p` により観察)。Monitor ツールが `command` を受け取る(この環境のツールの定義)。CiNii Books の項目名、NDL の `recordSchema=dcndl` と `creator=` の索引 |
-| 未確認 | GitHub の `pull_request` のワークフローが PR の側の定義で動くか(独立検証は、一般的な仕様では動くと指摘)。Windows・macOS の実機、GitHub Actions 上の実行、lualatex による PDF、mmdc による図の画像化 |
+| 未確認 | GitHub の `pull_request` のワークフローが PR の側の定義で動くか(独立検証は、一般的な仕様では動くと指摘)。Windows・macOS の実機、GitHub Actions 上の実行、lualatex による PDF、mmdc による図の画像化。v2 の機械の照合の語の一覧が実際の原稿でどれだけ当たるか |

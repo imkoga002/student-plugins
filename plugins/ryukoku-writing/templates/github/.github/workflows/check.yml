@@ -1,12 +1,14 @@
 name: check
 # ryukoku-writing review gate. The pull request is checked with the BASE branch's copy of the tools, so
 # a PR that rewrites tools/ cannot change how it is checked. What it verifies:
-#   - every human decision (VERIFIED, accepted proposal hunks, approved style rules, resolved comments, section
-#     sign-offs, course policy, opt-out) carries an Ed25519 signature by a signer trusted on the BASE branch
-#     (.ryukoku/signers.json there; the PR's own signers are not trusted, not even on the first PR)
-#   - .ryukoku/signoffs.jsonl and .ryukoku/ai-use-log.jsonl only extend the base versions (nothing deleted)
-#   - every change detection in the AI-use log has a signed decision; every changed manuscript file has a
-#     current section sign-off
+#   - VERIFIED and the final pre-submission confirmation carry an Ed25519 signature by a signer trusted on the BASE
+#     branch (.ryukoku/signers.json there; the PR's own signers are not trusted, not even on the first PR); the
+#     other human decisions (claim cards, proposals, rules, comments, sections, course policy, opt-out) are
+#     recorded confirmations bound to the content they cover
+#   - .ryukoku/signoffs.jsonl, .ryukoku/ai-use-log.jsonl and .ryukoku/provenance.jsonl only extend the base
+#     versions (nothing deleted)
+#   - every change detection in the AI-use log has a decision; every changed manuscript file has a current
+#     section confirmation; no AI-written paragraph when the course is recorded as prohibited
 #   - tools/, the ./rk launchers, .github/ and .githooks/ are unchanged in the PR unless the student signed a
 #     'guarded pr' confirmation of exactly those changes; signers other than the first one on the base branch must
 #     be endorsed by an already trusted signer

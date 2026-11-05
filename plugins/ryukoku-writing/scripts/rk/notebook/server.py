@@ -1,18 +1,27 @@
 """Evidence notebook (証拠ノート): one local screen for reading the evidence and making every human decision.
 Python standard library only; binds 127.0.0.1; no external requests; no CDN.
 
-Tabs, Host/Origin checks, ARIA and both languages; human states are protected by the student's passphrase
-signatures, not by a PIN or a cookie:
-  * Nothing on this screen creates a human state without the passphrase. The student opens an item (the server
-    returns its full content, its digest and a view token = HMAC(server secret, kind|id|digest)), chooses a
-    decision, collects several decisions in the "to sign" list, and enters the passphrase once. POST /api/sign
-    re-reads every item, refuses any item whose content changed since it was displayed (token mismatch) or that
-    was never displayed (no token), derives the key once, signs each item with its own digest, applies the
-    decisions, and drops the key (decide.sign_batch). There is no "accept all" request.
+Tabs, Host/Origin checks, ARIA and both languages:
+  * The student opens an item (the server returns its full content, its digest and a view token = HMAC(server
+    secret, kind|id|digest)) and chooses a decision. POST /api/sign re-reads every item and refuses any item whose
+    content changed since it was displayed (token mismatch) or that was never displayed (no token).
+  * Most decisions (a claim card is mine, accept/reject a proposal, resolve a comment, approve a rule, ...) are
+    recorded at once as light confirmations, one button per item, without the passphrase.
+  * VERIFIED and the final pre-submission confirmation need the passphrase: they collect in the "to sign" list and
+    one passphrase entry signs each with its own digest; the key is dropped afterwards (decide.sign_batch). There
+    is no "accept all" request.
   * The AI may start this server (the passphrase is needed for anything that counts); the code always runs from
     the installed plugin, never from the project (rk.py notebook refuses the project copy, which an AI tool could have rewritten).
-  * Unsigned writes are limited to things that are not confirmations: a new comment or reply by the student or
-    advisor, reopening a comment, and the reason for selecting a search result.
+  * Every /api/ request needs the session key (header X-RK-Session). The key is made at server start, is never
+    served by an endpoint and never written to stdout or to a file: it is printed only on the student's terminal
+    (/dev/tty), as the #k=... fragment of the URL, which the browser does not send to the server. That is why the
+    student starts this page with ./rk notebook in their own terminal: an AI tool call has no terminal, so a page the
+    AI started could not be used, and a request the AI makes with curl has no key. The page keeps the key in
+    sessionStorage and drops the fragment from the address bar. Limits: a program running with the student's rights
+    can read the terminal or the browser's storage, or run its own server; the key stops prompt-less requests, not
+    a program the student allowed.
+  * Writes that are not decisions: a new comment or reply by the student, reopening a comment, and the reason for
+    selecting a search result.
   * Five wrong passphrases lock signing for a while (exponential), to stop guessing through the screen.
 """
 import difflib
@@ -32,7 +41,7 @@ from urllib.parse import parse_qs, urlparse
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from rklib import bias, check, decide, msguard, proposals, search, searchlog, sign, subjects, trust  # noqa: E402
+from rklib import bias, check, decide, msguard, proposals, provenance, search, searchlog, sign, subjects, trust  # noqa: E402
 from rklib.common import RkError, feedback_lang, load_config, manuscript_files, read_text, rel, safe_rel  # noqa: E402
 from rklib.common import plugin_version  # noqa: E402
 from rklib.human import CHECKLIST, CODE_ROOT, why_proposals  # noqa: E402
@@ -47,6 +56,7 @@ class App(object):
         self.proj = os.path.abspath(proj)
         self.port = port
         self.secret = secrets.token_bytes(32)
+        self.session = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.fails = 0
         self.locked_until = 0.0
@@ -71,15 +81,19 @@ class App(object):
                 "codes": [{"code": c["code"], "ja": c["ja"], "en": c["en"]} for c in tax["codes"] if c["layer"] != "T"],
                 "checklist": [{"id": k, "ja": CHECKLIST[k][0], "en": CHECKLIST[k][1]} for k in subjects.CHECKLIST_IDS],
                 "why_proposals": why_proposals(self.lang()),
+                "needs_signature": sorted([k, d] for k, d in sign.NEEDS_SIGNATURE),
                 "code": {"root": CODE_ROOT, "version": plugin_version(CODE_ROOT)}}
 
     def state(self):
         idx, trusted = self.idx()
         rep = check.run(self.proj, stage="draft")
         cfg = load_config(self.proj)
+        sm = provenance.summary(self.proj)
         return {"signers": [sign.fingerprint(k) for k in trusted], "errors": rep.errors[:30], "warns": rep.warns[:30],
                 "notes": rep.notes[:10], "course": cfg.get("course_name", ""), "ai_policy": cfg.get("ai_policy", "unknown"),
-                "counts": {"hunks": len(subjects.hunks(self.proj)), "changes": len(msguard.pending(self.proj, idx)),
+                "provenance": {"paragraphs": sm["paragraphs"], "by_origin": {k: v[0] for k, v in sm["by_origin"].items()}},
+                "counts": {"cards": len([c for c in subjects.cards(self.proj) if not sign.current(idx, "card", c.sid, c.digest)]),
+                           "hunks": len(subjects.hunks(self.proj)), "changes": len(msguard.pending(self.proj, idx)),
                            "comments": len([c for c in subjects.comments(self.proj) if not c.claimed]),
                            "rules": len([r for r in subjects.rules(self.proj) if not r.claimed]),
                            "sources": len([s for s in subjects.sources(self.proj) if not s.claimed]),
@@ -99,6 +113,10 @@ class App(object):
             return {"items": [row(s, dict({"target": s.content.get("target"), "why": s.content.get("why"), "stale": s.content.get("stale")},
                                           **({"decisions": ["rejected"]} if s.content.get("stale") else {})))
                               for s in subjects.hunks(self.proj)]}
+        if tab == "cards":
+            return {"items": [row(s, {"confirmed": bool(sign.current(idx, "card", s.sid, s.digest)),
+                                      "stale": bool(sign.latest(idx, "card", s.sid)) and not sign.current(idx, "card", s.sid, s.digest)})
+                              for s in subjects.cards(self.proj)]}
         if tab == "evidence":
             return {"sources": [row(s, {"machine": s.content.get("machine_status")}) for s in subjects.sources(self.proj)],
                     "claims": [row(s, {"source_human": s.content.get("source_human_status")}) for s in subjects.claims(self.proj)]}
@@ -117,7 +135,10 @@ class App(object):
                 secs.append(row(s, {"current": bool(sign.current(idx, "section", s.sid, s.digest))}))
             days = [row(s, {"confirmed": bool(sign.latest(idx, "ailog", s.sid))}) for s in subjects.ailog_days(self.proj)]
             ps = subjects.presubmit_subject(self.proj)
-            return {"sections": secs, "days": days, "presubmit": {"current": bool(sign.current(idx, "presubmit", ps.sid, ps.digest))}}
+            from rklib import disclosure
+            facts, _u = disclosure.facts(self.proj, self.lang())
+            return {"sections": secs, "days": days, "presubmit": {"current": bool(sign.current(idx, "presubmit", ps.sid, ps.digest))},
+                    "facts": facts, "statements": {r: read_text(os.path.join(self.proj, r)) for r in subjects.disclosure_statements(self.proj)}}
         if tab == "research":
             def rd(r):
                 try:
@@ -183,6 +204,11 @@ class App(object):
         elif kind == "presubmit":
             rep = check.run(self.proj, stage="draft")
             out["errors"] = rep.errors
+        elif kind == "section":
+            pass
+        if kind == "section":
+            att = provenance.attribution(self.proj).get(sid, [])
+            out["ai_paragraphs"] = [[r["start"], r["end"], r["origin"]] for r in att if r["origin"] in ("ai_wrote", "ai_edited", "student_after_ai")]
         return out
 
     def doc(self, relp):
@@ -200,8 +226,6 @@ class App(object):
                 return 429, {"error": "合言葉の誤りが続いたため、%d 秒待つ / too many wrong passphrases; wait %d s"
                                       % (int(self.locked_until - now) + 1, int(self.locked_until - now) + 1)}
             pw = body.get("passphrase")
-            if not isinstance(pw, str) or not pw:
-                return 403, {"error": "合言葉がない。人間の判断は合言葉の署名でだけ記録される / passphrase required"}
             items = body.get("items")
             if not isinstance(items, list) or not items or len(items) > 500:
                 return 400, {"error": "署名する項目がない / no items"}
@@ -231,10 +255,18 @@ class App(object):
             recs = []
             if not clean and any("displayed" in (r.get("reason") or "") for r in results):
                 return 409, {"error": results[0]["reason"], "results": results}
+            need = any(sign.needs_signature(c["kind"], c["decision"]) for c in clean)
+            if need and (not isinstance(pw, str) or not pw):
+                return 403, {"error": "VERIFIED と提出前の最終確認には合言葉の署名が要る(ほかの判断は合言葉なしで記録できる) / "
+                                      "VERIFIED and the final confirmation need the passphrase"}
+            if not need:
+                pw = None
             try:
                 if clean:
                     recs = decide.sign_batch(self.proj, clean, pw, method="notebook", results=results)
             except sign.SignError as e:
+                if not need:
+                    return 400, {"error": str(e), "results": results}
                 self.fails += 1
                 if self.fails >= MAX_FAILS:
                     self.locked_until = time.time() + 30 * (2 ** (self.fails - MAX_FAILS))
@@ -244,9 +276,10 @@ class App(object):
             finally:
                 pw = None
                 body["passphrase"] = None
-            self.fails = 0
-            return 200, {"signed": [{"id": r["id"], "kind": r["kind"], "subject": r["subject"], "decision": r["decision"]} for r in recs],
-                         "results": results}
+            if need:
+                self.fails = 0
+            return 200, {"signed": [{"id": r["id"], "kind": r["kind"], "subject": r["subject"], "decision": r["decision"],
+                                     "with_passphrase": bool(r.get("sig"))} for r in recs], "results": results}
 
 
 def make_handler(app):
@@ -277,6 +310,13 @@ def make_handler(app):
         def _host_ok(self):
             if self.headers.get("Host", "") not in allowed_hosts:
                 self._send(403, {"error": "bad host"})
+                return False
+            return True
+
+        def _session_ok(self):
+            if not hmac.compare_digest(str(self.headers.get("X-RK-Session") or ""), app.session):
+                self._send(403, {"error": "この画面の鍵がない。自分の端末で ./rk notebook を実行し、その端末に表示された URL から開く"
+                                          " / no session key: open the URL that ./rk notebook printed in your own terminal"})
                 return False
             return True
 
@@ -314,6 +354,8 @@ def make_handler(app):
                 if u.path == "/":
                     blob = json.dumps(app.boot(), ensure_ascii=False).replace("</", "<\\/")
                     return self._send(200, raw=html_tpl.replace("/*__BOOT__*/null", blob).encode("utf-8"), ctype="text/html; charset=utf-8")
+                if not self._session_ok():
+                    return
                 if u.path == "/api/state":
                     return self._send(200, app.state())
                 if u.path == "/api/list":
@@ -336,6 +378,8 @@ def make_handler(app):
 
         def do_POST(self):
             if not self._host_ok():
+                return
+            if not self._session_ok():
                 return
             body = self._body()
             if body is None:
@@ -407,14 +451,23 @@ def serve(proj, port=0, open_browser=False, once=False):
     if problem:
         print(problem, file=sys.stderr)
         return 3
+    from rklib import sign as _sign
+    if not once and not _sign.tty_available():
+        print(("証拠ノートは、自分の端末(ターミナル)で ./rk notebook を実行して開く。画面の鍵はその端末にだけ表示する"
+               "(AI のツールの呼び出しには端末が無いので、ここでは起動しない)。" if lang != "en" else
+               "Open the evidence notebook with ./rk notebook in your own terminal; the page's key is shown only there "
+               "(an AI tool call has no terminal, so it is not started here)."), file=sys.stderr)
+        return 3
     srv = make_server(proj, port)
     url = "http://127.0.0.1:%d/" % srv.server_address[1]
-    print(("証拠ノート: %s\n(127.0.0.1 だけ・外部通信なし。終了は Ctrl+C。合言葉は、この画面の署名の欄にだけ入れる。チャットには入れない)" if lang != "en" else
-           "Evidence notebook: %s\n(127.0.0.1 only, no external requests; Ctrl+C to stop. Type your passphrase only into this page's sign box, never into the chat.)") % url, flush=True)
-    if open_browser:
-        webbrowser.open(url)
+    print(("証拠ノート: %s(この URL だけでは開けない。鍵つきの URL は端末にだけ表示する)\n(127.0.0.1 だけ・外部通信なし。終了は Ctrl+C。合言葉が要るのは VERIFIED と提出前の最終確認だけで、この画面の署名の欄にだけ入れる。チャットには入れない)" if lang != "en" else
+           "Evidence notebook: %s (this URL alone does not open it; the URL with its key is shown on the terminal only)\n(127.0.0.1 only, no external requests; Ctrl+C to stop. Only VERIFIED and the final confirmation need the passphrase; type it only into this page's sign box, never into the chat.)") % url, flush=True)
     if once:
         return 0
+    keyed = url + "#k=" + srv.app.session
+    _sign.tty_print(("開く URL(鍵つき。チャットに貼らない): %s" if lang != "en" else "Open this URL (it carries the key; never paste it into the chat): %s") % keyed)
+    if open_browser:
+        webbrowser.open(keyed)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

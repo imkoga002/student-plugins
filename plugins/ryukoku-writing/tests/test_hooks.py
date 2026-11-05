@@ -1,4 +1,4 @@
-"""The hooks: the pre-tool guard (writes to the manuscript, ledgers and protected files, human-only commands,
+"""The hooks: the pre-tool guard (writes to the manuscript by the course AI policy, ledgers and protected files, human-only commands,
 pushes to main), where the session is opened, silence outside a project, the prompt guard (ghostwriting and
 question-delegation requests, personal data), the course AI policy and the search records. Hooks are fed Claude
 Code's hook JSON on stdin; an "AI tool call" is PreToolUse -> run if allowed -> PostToolUse (helpers.Env.ai_bash). All values are fictitious."""
@@ -39,7 +39,7 @@ class PreToolUse(unittest.TestCase):
             ("Bash", {"command": f"python3 -c \"open('{LEDGER}','a').write('c9,x,VERIFIED\\n')\""}, "deny"),
             ("Bash", {"command": f"sed -i s/CANDIDATE/VERIFIED/ {LEDGER} && cat {LEDGER}"}, "deny"),
             ("Bash", {"command": f'V=VERI; sed -i "s/CANDIDATE/${{V}}FIED/" {LEDGER}'}, "deny"),
-            ("Write", {"file_path": f"{P}/{MS}", "content": "# 序論\n本稿では..."}, "deny"),
+            ("Write", {"file_path": f"{P}/{MS}", "content": "# 序論\n本稿では..."}, "ask"),  # policy unknown: asks
             ("Bash", {"command": f"cat > {MS} <<EOF\n本稿では\nEOF"}, "deny"),
             ("Bash", {"command": "git push --force origin main"}, "deny"),
             ("Bash", {"command": "git push origin main"}, "deny"),
@@ -56,7 +56,7 @@ class PreToolUse(unittest.TestCase):
             ("Write", {"file_path": f"{P}/.claude/settings.json", "content": '{"enabledPlugins":{}}'}, "deny"),
             ("Write", {"file_path": f"{P}/.ryukoku/ai-use-log.jsonl", "content": ""}, "deny"),
             ("Bash", {"command": "rm .ryukoku/ai-use-log.jsonl"}, "deny"),
-            ("Write", {"file_path": MS, "content": "x"}, "deny"),
+            ("Write", {"file_path": MS, "content": "x"}, "ask"),
             ("Write", {"file_path": f"{P}/.ryukoku/signoffs.jsonl", "content": "{}"}, "deny"),
             ("Edit", {"file_path": f"{P}/.ryukoku/config.yml", "old_string": "ai_policy: unknown", "new_string": "ai_policy: allowed"}, "deny"),
         ]
@@ -69,22 +69,28 @@ class PreToolUse(unittest.TestCase):
             r = self.E.hook("pre-guard.sh", None, raw=raw)
             self.assertEqual((decision(r), r.returncode), ("-", 0))
 
+    def ms(self, tool, ti, cwd=None, project_dir=None):
+        """A manuscript write under the default policy (unknown): it asks, with the manuscript reason."""
+        r = self.E.pre(tool, ti, cwd=cwd, project_dir=project_dir)
+        self.assertEqual(decision(r), "ask", str(ti))
+        self.assertIn("ai_policy: unknown", reason(r))
+
     def test_paths_windows_case_symlink_normalisation(self):
         w = "C:\\Users\\student\\thesis"
-        self.assertEqual(self.d("Write", {"file_path": w + "\\manuscript\\main.md", "content": "x"}, cwd=w, project_dir=self.P), "deny")
-        self.assertEqual(self.d("Write", {"file_path": "C:/Users/student/thesis/manuscript/main.md", "content": "x"}, cwd=w, project_dir=self.P), "deny")
-        self.assertEqual(self.d("Write", {"file_path": f"{self.P}/Manuscript/main.md", "content": "x"}), "deny")
-        self.assertEqual(self.d("NotebookEdit", {"notebook_path": f"{self.P}/{MS}", "new_source": "x"}), "deny")
+        self.ms("Write", {"file_path": w + "\\manuscript\\main.md", "content": "x"}, cwd=w, project_dir=self.P)
+        self.ms("Write", {"file_path": "C:/Users/student/thesis/manuscript/main.md", "content": "x"}, cwd=w, project_dir=self.P)
+        self.ms("Write", {"file_path": f"{self.P}/Manuscript/main.md", "content": "x"})
+        self.ms("NotebookEdit", {"notebook_path": f"{self.P}/{MS}", "new_source": "x"})
         self.assertEqual(self.d("Bash", {"command": "copy draft.md Manuscript\\main.md & cp x MANUSCRIPT\\main.md"}), "deny")
 
     def test_dot_segments_in_the_path(self):
-        self.assertEqual(self.d("Edit", {"file_path": f"{self.P}/manuscript//./main.md", "old_string": "a", "new_string": "b"}), "deny")
+        self.ms("Edit", {"file_path": f"{self.P}/manuscript//./main.md", "old_string": "a", "new_string": "b"})
 
     def test_symlink_target_is_resolved(self):
         link = self.E.path("mlink")
         if not os.path.islink(link):
             os.symlink("manuscript", link)
-        self.assertEqual(self.d("Write", {"file_path": f"{link}/main.md", "content": "x"}), "deny")
+        self.ms("Write", {"file_path": f"{link}/main.md", "content": "x"})
 
     def test_write_operations_on_the_manuscript(self):
         cmds = [f"dd if=/tmp/x of={MS}", f"install -m 644 /tmp/x {MS}", f"rsync /tmp/x {MS}", f"ln -sf /tmp/x {MS}",
@@ -107,17 +113,19 @@ class PreToolUse(unittest.TestCase):
         self.assertEqual(self.d("Read", {"file_path": f"{self.P}/{MS}"}), "-")
 
     def test_human_only_commands_denied(self):
-        for c in ["./rk apply", "./rk verify C001", "python3 tools/rk/rk.py style", "./rk resolve", "./rk signoff",
+        for c in ["./rk apply", "./rk confirm", "./rk confirm C001", "./rk verify C001", "python3 tools/rk/rk.py style", "./rk resolve", "./rk signoff",
                   "./rk changes", "./rk optout", "./rk setup", "./rk sign claim C001 --decision VERIFIED", "rk.cmd apply",
                   "tools\\rk\\rk.py apply", "./rk trust", "./rk update-tools", "./rk notebook", "python3 tools/rk/rk.py notebook --project ."]:
             with self.subTest(c=c):
                 self.assertEqual(self.d("Bash", {"command": c}), "deny")
 
-    def test_notebook_only_from_plugin_root(self):
+    def test_notebook_is_the_students_to_start(self):
+        # v2: the page's key is shown only on the student's terminal, so the AI does not start the notebook at all
         from helpers import PLUGIN
         ok = 'python3 "%s/scripts/rk/rk.py" --project "%s" notebook' % (PLUGIN, self.P)
         r = self.E.pre("Bash", {"command": ok, "run_in_background": True})
-        self.assertEqual(decision(r), "-")
+        self.assertEqual(decision(r), "deny")
+        self.assertIn("./rk notebook", reason(r))
         self.assertEqual(self.d("Bash", {"command": "python3 /tmp/elsewhere/scripts/rk/rk.py notebook --project ."}), "deny")
 
     def test_tty_emulation_detached_and_msguard(self):
@@ -150,8 +158,10 @@ class PreToolUse(unittest.TestCase):
 
     def test_reason_explains_and_offers_alternative(self):
         r = reason(self.E.pre("Write", {"file_path": f"{self.P}/{MS}", "content": "x"}))
-        self.assertIn("Ⅲ-4", r)
-        self.assertIn("propose", r)
+        self.assertIn("Ⅲ-3", r)
+        self.assertIn("./rk setup", r)
+        r = reason(self.E.pre("Bash", {"command": f"echo x >> {MS}"}))
+        self.assertIn("Write・Edit", r)
         r = reason(self.E.pre("Write", {"file_path": f"{self.P}/research/questions.md", "content": "Q1: x"}))
         self.assertIn("rq-dialogue", r)
 
@@ -168,7 +178,7 @@ class Locations(unittest.TestCase):
     def test_parent_folder_session(self):
         parent = self.E.base
         r = self.E.pre("Write", {"file_path": f"{self.E.proj}/manuscript/main.md", "content": "x"}, cwd=parent, project_dir=parent)
-        self.assertEqual(decision(r), "deny")
+        self.assertEqual(decision(r), "ask")  # found as this project's manuscript: the course policy (unknown) asks
         self.assertIn("開き直す", reason(r))
         r = self.E.pre("Bash", {"command": "echo x >> thesis/manuscript/main.md"}, cwd=parent, project_dir=parent)
         self.assertEqual(decision(r), "deny")
@@ -178,11 +188,12 @@ class Locations(unittest.TestCase):
     def test_child_folder_session(self):
         child = self.E.path("manuscript")
         r = self.E.pre("Write", {"file_path": f"{child}/main.md", "content": "x"}, cwd=child, project_dir=child)
-        self.assertEqual(decision(r), "deny")
+        self.assertEqual(decision(r), "ask")
+        self.assertIn("ai_policy: unknown", reason(r))
         r = self.E.pre("Bash", {"command": "echo x >> main.md"}, cwd=child, project_dir=child)
         self.assertEqual(decision(r), "deny")
         r = self.E.pre("Write", {"file_path": "main.md", "content": "x"}, cwd=child, project_dir=child)
-        self.assertEqual(decision(r), "deny")
+        self.assertEqual(decision(r), "ask")
 
 
 class Outside(unittest.TestCase):
@@ -319,18 +330,58 @@ class Policy(unittest.TestCase):
         s = re.sub(r'(?m)^ai_allowed_uses: "[^"]*"', 'ai_allowed_uses: "%s"' % uses, s)
         open(p, "w", encoding="utf-8").write(s)
 
-    def test_prohibited_denies_the_eleven_operations(self):
+    def test_manuscript_writes_follow_the_course_policy(self):
+        P = self.E.proj
+        w = ("Write", {"file_path": f"{P}/{MS}", "content": "x"})
+        e = ("Edit", {"file_path": f"{P}/{MS}", "old_string": "a", "new_string": "b"})
+        sh = ("Bash", {"command": f"echo x >> {MS}"})
+        for pol, want in (("allowed", "-"), ("limited", "ask"), ("unknown", "ask"), ("prohibited", "deny")):
+            self.set_policy(pol, "research")
+            with self.subTest(policy=pol):
+                self.assertEqual(decision(self.E.pre(*w)), want)
+                self.assertEqual(decision(self.E.pre(*e)), want)
+                self.assertEqual(decision(self.E.pre(*sh)), "deny")  # never from the shell
+        self.set_policy("limited", "research")
+        r = reason(self.E.pre(*w))
+        self.assertIn("limited", r)
+        self.assertIn("シラバス", r)
+
+    def test_allowed_write_is_recorded_as_provenance(self):
+        self.set_policy("allowed")
+        self.E.post("Bash", {"command": "true"}, tuid="i0")
+        p = self.E.path(MS)
+        d, ctx = self.E.ai_edit(p, self.E.read(MS) + "\n要因 A は現象 X の一因となりうる。\n", tuid="w1")
+        self.assertEqual(d, "-")
+        self.assertIn("由来の記録", ctx)
+        log = self.E.read(".ryukoku", "provenance.jsonl")
+        self.assertIn('"kind": "ai_wrote"', log)
+        self.assertIn('"policy": "allowed"', log)
+        self.assertNotIn('"type": "detection"', self.E.read(".ryukoku", "ai-use-log.jsonl"))
+        r = self.E.rk("check")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("AI が書いた 1", r.stdout)
+
+    def test_prohibited_blocks_writing_but_not_research_or_verification(self):
         self.set_policy("prohibited")
         P = self.E.proj
-        ops = [("Write", {"file_path": f"{P}/{MS}", "content": "x"}), ("Read", {"file_path": f"{P}/{MS}"}),
-               ("Grep", {"pattern": "x", "path": f"{P}/manuscript"}), ("Edit", {"file_path": f"{P}/research/plan.md", "old_string": "a", "new_string": "b"}),
-               ("WebSearch", {"query": "現象 X"}), ("WebFetch", {"url": "https://example.test/"}), ("Task", {"subagent_type": "research-scout"}),
-               ("Bash", {"command": f"cat {MS}"}), ("Bash", {"command": "python3 tools/rk/rk.py search crossref x --question-ref Q1"}),
-               ("Bash", {"command": "pandoc manuscript/main.md -o build/x.docx"}), ("Bash", {"command": "python3 tools/rk/rk.py argmap review/a.json"})]
-        for tool, ti in ops:
+        deny = [("Write", {"file_path": f"{P}/{MS}", "content": "x"}), ("Write", {"file_path": f"{P}/claims/C001.md", "content": "x"}),
+                ("Bash", {"command": "python3 tools/rk/rk.py propose start manuscript/main.md"}),
+                ("Bash", {"command": "python3 tools/rk/rk.py claims new --words x"}),
+                ("Bash", {"command": "python3 tools/rk/rk.py provenance materials --file manuscript/main.md"}),
+                ("Write", {"file_path": f"{P}/proposals/.work/W1/main.md", "content": "x"})]
+        for tool, ti in deny:
             with self.subTest(tool=tool, ti=str(ti)[:60]):
                 self.assertEqual(decision(self.E.pre(tool, ti)), "deny")
-        self.assertEqual(decision(self.E.pre("Bash", {"command": "python3 tools/rk/rk.py check"})), "-")
+        allow = [("Read", {"file_path": f"{P}/{MS}"}), ("Grep", {"pattern": "x", "path": f"{P}/manuscript"}),
+                 ("Edit", {"file_path": f"{P}/research/plan.md", "old_string": "a", "new_string": "b"}),
+                 ("WebSearch", {"query": "現象 X"}), ("Task", {"subagent_type": "research-scout"}), ("Task", {"subagent_type": "claim-verifier"}),
+                 ("Bash", {"command": f"cat {MS}"}), ("Bash", {"command": "python3 tools/rk/rk.py search crossref x --question-ref Q1"}),
+                 ("Bash", {"command": "python3 tools/rk/rk.py verification scaffold manuscript/main.md"}),
+                 ("Write", {"file_path": f"{P}/review/verification/x.md", "content": "x"}),
+                 ("Bash", {"command": "python3 tools/rk/rk.py argmap review/a.json"}), ("Bash", {"command": "python3 tools/rk/rk.py check"})]
+        for tool, ti in allow:
+            with self.subTest(tool=tool, ti=str(ti)[:60]):
+                self.assertEqual(decision(self.E.pre(tool, ti)), "-")
 
     def test_limited_asks_outside_the_allowed_uses(self):
         self.set_policy("limited", "research")
@@ -382,8 +433,8 @@ class Hooks(unittest.TestCase):
             txt = reason(r)
             self.assertIn("Write all feedback", txt)
             self.assertIn("Working constitution, key points", txt)  # CONSTITUTION.md digest (decision 11)
-            self.assertIn('--project "%s" notebook' % E.proj, txt)
-            self.assertIn("scripts/rk/rk.py", txt)
+            self.assertIn("./rk notebook", txt)
+            self.assertIn(E.proj, txt)
             self.assertIn("ryukoku-writing", txt)
             self.assertIn('"model": "claude-test-model"', E.read(".ryukoku", "ai-use-log.jsonl"))
             with open(os.path.join(E.state, "plugin-root")) as f:

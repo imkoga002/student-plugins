@@ -327,6 +327,6 @@ class StyleExtraction(unittest.TestCase):
                 f.write(s)
             r = E.rk("check")
             self.assertEqual(r.returncode, 1)
-            self.assertIn("署名つきの承認がない", r.stdout)
+            self.assertIn("承認の記録がない", r.stdout)
         finally:
             E.cleanup()

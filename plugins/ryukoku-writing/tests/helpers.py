@@ -125,15 +125,36 @@ class Env(object):
     def tty(self, args, answers, timeout=120, script=None):
         return rk_tty(self, args, answers, timeout, script)
 
-    def setup(self, policy="a", optout="y", git="n", passphrase=PASS):
-        answers = ["", passphrase, passphrase, "", policy] + (["research,verify"] if policy == "l" else []) + ["", ""] + [optout]
-        if optout == "y" or True:
-            answers += [passphrase]
-        answers += [git]
+    def setup(self, policy="a", optout="y", git="n", passphrase=PASS, register=True):
+        """./rk setup at the terminal: name, course policy (with its source), opt-out (light confirmations), then the
+        passphrase now (REGISTER) or later, then Git."""
+        answers = ["", "", policy] + (["research,verify"] if policy == "l" else []) + ["", ""] + [optout]
+        answers += (["y", passphrase, passphrase] if register else ["n"]) + [git]
         rc, out = self.tty(["setup"], answers)
         if rc != 0:
             raise RuntimeError(out[-3000:])
         return out
+
+    def set_policy(self, policy):
+        """Edit ai_policy in .ryukoku/config.yml as the student would in an editor (tests of the hooks)."""
+        import re
+        p = self.path(".ryukoku", "config.yml")
+        with open(p, encoding="utf-8") as f:
+            s = f.read()
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(re.sub(r"(?m)^ai_policy:[^\n#]*", "ai_policy: %s " % policy, s, count=1))
+
+    def ai_edit(self, path, new_text, tool="Write", tuid="w1"):
+        """An AI Write (or Edit) of PATH: PreToolUse -> write when allowed (or asked and allowed) -> PostToolUse.
+        Returns (decision, post context)."""
+        ti = {"file_path": path, "content": new_text}
+        d = decision(self.pre(tool, ti, tuid=tuid))
+        if d == "deny":
+            return d, ""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new_text)
+        return d, reason(self.post(tool, ti, tuid=tuid))
 
 
 def decision(r):

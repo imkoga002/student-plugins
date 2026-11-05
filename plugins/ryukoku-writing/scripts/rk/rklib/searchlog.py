@@ -65,8 +65,11 @@ def _add(proj, db, query, question_ref, hits, filters, selected, reason, by, end
     if errs:
         raise RkError("\n".join(errs))
     os.makedirs(os.path.dirname(path(proj)), exist_ok=True)
+    line = json.dumps(rec, ensure_ascii=False)
     with open(path(proj), "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        f.write(line + "\n")
+    from .common import note_written
+    note_written(proj, os.path.join("research", "search-log.jsonl"), [line])
     return rec
 
 

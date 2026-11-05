@@ -9,6 +9,19 @@ import sys
 MARKER = os.path.join(".ryukoku", "config.yml")
 
 
+def _human_commands():
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "human-commands.txt")
+    try:
+        with open(p, encoding="utf-8") as f:
+            return tuple(ln.strip() for ln in f if ln.strip() and not ln.startswith("#"))
+    except OSError:  # fail closed: the list as shipped
+        return ("setup", "confirm", "apply", "verify", "style", "resolve", "signoff", "disclose", "changes", "optout",
+                "import-docx", "sign", "trust", "update-tools", "notebook", "unattributed", "review")
+
+
+HUMAN_COMMANDS = _human_commands()
+
+
 class RkError(Exception):
     """A user-facing error: printed without a traceback."""
 
@@ -27,6 +40,10 @@ def find_project(start=None):
 
 def _unquote(v):
     v = v.strip()
+    if v[:1] in ("\"", "'"):
+        end = v.find(v[0], 1)
+        if end > 0 and not v[end + 1:].strip() or (end > 0 and re.match(r"^\s+#", v[end + 1:])):
+            return v[1:end]  # a quoted value, optionally followed by a comment
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
         return v[1:-1]
     return re.sub(r"\s+#.*$", "", v).strip()
@@ -40,11 +57,40 @@ def load_config(proj):
             for line in f:
                 if not line.strip() or line.lstrip().startswith("#") or line[0].isspace():
                     continue
-                m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$", line.rstrip("\n"))
-                if m:
+                m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*(.*)$", line.rstrip("\n"))
+                if m and m.group(1) not in out:  # the first line that sets a key counts (as the hooks read it)
                     out[m.group(1)] = _unquote(m.group(2))
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         pass
+    return out
+
+
+POLICIES = ("allowed", "limited", "prohibited", "unknown")
+
+
+def config_problems(proj):
+    """Why .ryukoku/config.yml cannot be trusted as written: missing or unreadable, a key set on more than one line,
+    or ai_policy not exactly one of the four lower-case values. The hooks then treat the policy as unreadable and
+    deny manuscript writes."""
+    p = os.path.join(proj, MARKER)
+    try:
+        with open(p, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError) as e:
+        return ["%s を読めない(%s) / cannot read it" % (MARKER, type(e).__name__)]
+    seen, out = {}, []
+    for ln in lines:
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)[ \t]*:", ln)
+        if m:
+            seen[m.group(1)] = seen.get(m.group(1), 0) + 1
+    for k, n in sorted(seen.items()):
+        if n > 1:
+            out.append("%s が %d 行ある(どちらが正しいか分からない) / %s is set on %d lines" % (k, n, k, n))
+    pol = load_config(proj).get("ai_policy")
+    if seen.get("ai_policy", 0) == 0:
+        out.append("ai_policy の行がない / no ai_policy line")
+    elif pol not in POLICIES:
+        out.append("ai_policy %r は allowed・limited・prohibited・unknown(小文字)のどれでもない / ai_policy %r is not one of the four values" % (pol, pol))
     return out
 
 
@@ -119,6 +165,32 @@ def read_jsonl(path):
                 except ValueError:
                     raise RkError("%s %d 行目が JSON でない / line %d is not JSON" % (path, ln, ln))
     return out
+
+
+def _written_path(proj, relp):
+    return os.path.join(state_dir(proj), "written", relp.replace("\\", "/").replace("/", "__") + ".txt")
+
+
+def note_written(proj, relp, lines):
+    """Remember (outside the project) the hash of every line the plugin's own code appends to an append-only record.
+    msguard reports any line that appears in such a record during an AI tool call without being noted here (a line
+    appended by printf, an editor or a foreign script)."""
+    try:
+        p = _written_path(proj, relp)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            for ln in lines:
+                f.write(sha256_bytes(ln.rstrip("\r\n").encode("utf-8")) + "\n")
+    except OSError:
+        pass
+
+
+def written_hashes(proj, relp):
+    try:
+        with open(_written_path(proj, relp), encoding="utf-8") as f:
+            return {x.strip() for x in f if x.strip()}
+    except OSError:
+        return set()
 
 
 def append_jsonl(path, rec):
