@@ -85,6 +85,26 @@ class NoDirectoryTracking(unittest.TestCase):
         self.assertNotIn(("op", ";"), execgate.lex("false &&\ncd x")[:3])
         self.assertIn(("op", ";"), execgate.lex("a\nb"))
 
+    def test_a_line_continuation_inside_double_quotes_is_dropped_like_bash(self):
+        self.assertEqual(execgate.lex('echo x >> "manus\\\ncript/main.md"')[-1][1], "manuscript/main.md")
+        self.assertEqual(execgate.lex("echo x >> 'a\\\nb'")[-1][1], "a\\\nb")   # literal inside single quotes
+        E = Env()
+        try:
+            for pol in ("allowed", "prohibited"):
+                E.set_policy(pol)
+                for cmd in ('echo x >> "manus\\\ncript/main.md"',
+                            'echo x >> "thin\\\nking/log.md"',
+                            'printf x > "sources/iden\\\ntity.json"',
+                            'echo x | tee -a "manus\\\ncript/main.md"',
+                            "printf x > 'sources/a\tb.json'"):
+                    before = E.read("manuscript", "main.md")
+                    d, _ctx = E.ai_bash(cmd)
+                    self.assertEqual(d, "deny", (pol, cmd))
+                    self.assertEqual(before, E.read("manuscript", "main.md"))
+                    self.assertFalse(os.path.exists(E.path("sources", "identity.json")), cmd)
+        finally:
+            E.cleanup()
+
 
 class LedgerAndVerified(UseEnvState, unittest.TestCase):
     def test_ledger_files_changed_during_an_ai_call_are_detected_unless_the_plugin_wrote_them(self):

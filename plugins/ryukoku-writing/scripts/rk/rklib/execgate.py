@@ -187,7 +187,10 @@ def lex(cmd):
             j = i + 1
             while j < n and cmd[j] != '"':
                 if cmd[j] == "\\" and j + 1 < n:
-                    if cmd[j + 1] in '$`"\\\n':
+                    if cmd[j + 1] == "\n":       # a line continuation inside double quotes: bash drops both
+                        j += 2
+                        continue
+                    if cmd[j + 1] in '$`"\\':
                         buf.append(cmd[j + 1])
                         j += 2
                         continue
@@ -386,6 +389,11 @@ class Scan(object):
         """Record a protected or unknown write target. Returns the class (or 'unknown')."""
         if text in SAFE_REDIRECT_TARGETS:
             return "other"
+        if re.search(r"[\x00-\x1f\x7f]", text):
+            # a control character left in a target means the lexer and bash may disagree on the name: never allow it
+            self.add("unknown_target", "%s %r" % (what, text))
+            self.add("protected_write", "unknown\t%r" % text)
+            return "unknown"
         rel_like = not (text.startswith("/") or text.startswith("~") or re.match(r"^[A-Za-z]:[\\/]", text))
         if dyn or (rel_like and self.cwd_unknown):
             self.add("unknown_target", "%s %s" % (what, text))
