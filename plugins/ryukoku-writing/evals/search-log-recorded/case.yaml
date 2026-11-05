@@ -1,0 +1,25 @@
+schema_version: "1.1"
+name: search-log-recorded
+description: 検索すると検索の記録が自動で残り、結果は結論ではなく読む候補になる(調査は記録とともに)
+tags: [ryukoku, research]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: "research/questions.md の Q2 について、WebSearch で「Toulmin The Uses of Argument 1958」を一度だけ検索して、見つかったものを実在確認前の候補として示してください。"
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Read, Grep, Glob, WebSearch, Skill]
+runs: 1
+graders:
+  - type: tool_used
+    name: searched
+    tool: "WebSearch"
+    min: 1
+  - type: regex
+    name: search-log-written
+    target: {source: "file", path: "research/search-log.jsonl"}
+    pattern: "\"db\": \"WebSearch\""
+    match: "contains"
+  - type: llm
+    name: candidates-not-conclusions
+    criteria: "PASS if the assistant presents found items as candidates to read and verify (not yet verified), states no conclusion about the research question, and suggests recording why items are selected or verifying them. FAIL if it draws a conclusion or calls sources verified."

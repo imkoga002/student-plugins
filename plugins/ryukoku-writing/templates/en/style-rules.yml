@@ -1,0 +1,13 @@
+# Proposed style rules (not applied until you approve and sign each one on the screen or with ./rk style).
+# These are placeholders for choices, not the rules of any university. Check your course or department
+# guide and your instructor; reject or edit the value before approving.
+version: 1
+rules:
+  - id: "contractions"
+    kind: "forbidden_word"
+    value: "don't"
+    lang: "en"
+    source: "Plugin placeholder (no source; confirm with your course guide)"
+    confidence: "low"
+    status: "proposed"
+    note: "Many academic styles avoid contractions; add one rule per form you want flagged"

@@ -1,0 +1,11 @@
+# +east_asian_line_breaks がないと、日本語の段落内の改行が空白になる(pandoc の MANUAL「Extension: east_asian_line_breaks」
+# https://pandoc.org/MANUAL.html#extension-east_asian_line_breaks)。YAML は true/false で書く(pandoc 3.13 は YAML 1.2 で読み、
+# yes/no は文字列になる: https://pandoc.org/releases.html)。
+from: markdown+east_asian_line_breaks
+to: docx
+reference-doc: pandoc/reference.docx   # 初期化時に pandoc の既定から作る。Word でスタイル(フォント・余白・A4)だけを直す
+citeproc: true
+bibliography: sources/references.json
+# csl: pandoc/style.csl                 # 学部が指定する書式の CSL(日本語は公式 CSL リポジトリに SIST02 がある)
+metadata:
+  lang: ja

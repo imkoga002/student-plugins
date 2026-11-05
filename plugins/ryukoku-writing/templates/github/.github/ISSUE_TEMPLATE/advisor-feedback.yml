@@ -1,0 +1,21 @@
+name: 指導教員・レビュアーからの指摘 / Advisor feedback
+description: 面談やコメントでもらった指摘の記録と、自分の判断
+labels: ["advisor-feedback"]
+body:
+  - type: input
+    id: date
+    attributes:
+      label: 日付 / date
+      placeholder: YYYY-MM-DD
+    validations:
+      required: true
+  - type: textarea
+    id: feedback
+    attributes:
+      label: 指摘の内容(受けた言葉のまま)/ feedback as given
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: 自分の判断と理由(採用 / 一部採用 / 不採用)/ my decision and why

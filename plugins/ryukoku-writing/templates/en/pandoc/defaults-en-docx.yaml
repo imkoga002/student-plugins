@@ -1,0 +1,9 @@
+# Markdown -> docx. YAML booleans as true/false (pandoc 3.13 parses YAML 1.2).
+from: markdown
+to: docx
+reference-doc: pandoc/reference.docx   # 初期化時に pandoc の既定から作る。Word でスタイル(フォント・余白・A4)だけを直す
+citeproc: true
+bibliography: sources/references.json
+# csl: pandoc/style.csl                 # 学部が指定する書式の CSL(日本語は公式 CSL リポジトリに SIST02 がある)
+metadata:
+  lang: en-US

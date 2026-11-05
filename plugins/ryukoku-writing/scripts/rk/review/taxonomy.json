@@ -1,0 +1,188 @@
+{
+  "version": "1",
+  "source": "Seven layers (claim, definition, grounds, warrant, induction and causation, dialectic, organisation) after the Toulmin layout and the informal-logic criteria of acceptability, relevance and sufficiency (Stanford Encyclopedia of Philosophy, Informal Logic, https://plato.stanford.edu/entries/logic-informal/). Fallacy names are prompts for a question, not verdicts (Internet Encyclopedia of Philosophy, Fallacies, https://iep.utm.edu/fallacy/). I4 follows Geddes 1990, Political Analysis 2:131-150, DOI 10.1093/pan/2.1.131; the 必須/推奨 split follows COPE, Ethical Guidelines for Peer Reviewers (2013), DOI 10.24318/cope.2019.1.9. Codes, labels and questions are the plugin author's paraphrases; the taxonomy has not been piloted and inter-rater agreement is not tested. Layer T holds comments imported from Word.",
+  "format": "箇所 / コード / 観点 / 問い / 重要度(必須・推奨) / 確度(確定・要確認)。書き換えの欄は持たない。",
+  "layers": {
+    "A": "主張",
+    "B": "定義",
+    "C": "根拠",
+    "D": "論拠(飛躍)",
+    "E": "一般化・因果",
+    "F": "弁証",
+    "G": "構成",
+    "T": "取り込み(指導教員)"
+  },
+  "codes": [
+    {
+      "code": "C1",
+      "layer": "A",
+      "ja": "主張が特定できない",
+      "en": "Unclear claim",
+      "q": "この段落で読者に受け入れてほしい一文はどれですか？"
+    },
+    {
+      "code": "C2",
+      "layer": "A",
+      "ja": "主張の強さが根拠を超える",
+      "en": "Overclaiming / missing qualifier",
+      "q": "この結論は、どの範囲・どの程度の確からしさで言えますか？ 例外となる条件はありますか？"
+    },
+    {
+      "code": "D1",
+      "layer": "B",
+      "ja": "定義が曖昧",
+      "en": "Undefined / ambiguous term",
+      "q": "この語は、どの資料のどの定義に対応しますか？ 範囲に含まれないものは何ですか？"
+    },
+    {
+      "code": "D2",
+      "layer": "B",
+      "ja": "用語の意味のずれ",
+      "en": "Equivocation / term drift",
+      "q": "別の箇所の同じ語と同じ意味ですか？ 違うなら推論はどう変わりますか？"
+    },
+    {
+      "code": "D3",
+      "layer": "B",
+      "ja": "評価語の基準が不明",
+      "en": "Unoperationalized evaluation",
+      "q": "この評価語は、どの指標で、何と比べた判断ですか？"
+    },
+    {
+      "code": "G1",
+      "layer": "C",
+      "ja": "根拠が示されていない・不足",
+      "en": "Missing / insufficient grounds",
+      "q": "この主張を支えるデータや文献は本文のどこにありますか？ それだけでこの強さの結論に足りますか？"
+    },
+    {
+      "code": "G2",
+      "layer": "C",
+      "ja": "根拠と主張の関連が不明",
+      "en": "Irrelevant grounds",
+      "q": "この事実が正しいとして、それは主張の真偽にどう影響しますか？"
+    },
+    {
+      "code": "G3",
+      "layer": "C",
+      "ja": "出典の信頼性・適合性",
+      "en": "Source credibility / fitness",
+      "q": "この数値の一次資料はどれですか？ 調査年・対象・定義は主張と一致していますか？"
+    },
+    {
+      "code": "G4",
+      "layer": "C",
+      "ja": "出典の読み違い・歪曲",
+      "en": "Misrepresented source",
+      "q": "原典の該当箇所は、本当にこの主張を述べていますか？ 前後の文脈で限定が付いていませんか？"
+    },
+    {
+      "code": "G5",
+      "layer": "C",
+      "ja": "根拠の選択的使用",
+      "en": "Cherry-picking",
+      "q": "この結論に反するデータや先行研究を探しましたか？ 見つかった場合はどう扱いますか？"
+    },
+    {
+      "code": "W1",
+      "layer": "D",
+      "ja": "論理の飛躍(論拠の欠落)",
+      "en": "Missing warrant (logical leap)",
+      "q": "事実から結論へ進むには、どんな一般的な前提が必要ですか？ それは本文に書かれていますか？"
+    },
+    {
+      "code": "W2",
+      "layer": "D",
+      "ja": "論拠の裏づけ不足",
+      "en": "Unbacked warrant",
+      "q": "この前提は、どの理論・先行研究に支えられていますか？ この文脈にも当てはまりますか？"
+    },
+    {
+      "code": "W3",
+      "layer": "D",
+      "ja": "接続表現の不整合",
+      "en": "Connective mismatch",
+      "q": "この接続表現の前後は、本当にその関係(根拠→帰結など)ですか？"
+    },
+    {
+      "code": "I1",
+      "layer": "E",
+      "ja": "一般化の範囲が広すぎる",
+      "en": "Hasty generalization",
+      "q": "何件の事例からこの一般化をしていますか？ それらは対象全体を代表していますか？"
+    },
+    {
+      "code": "I2",
+      "layer": "E",
+      "ja": "因果の飛躍",
+      "en": "Unwarranted causal inference",
+      "q": "同時に見られる以外に、逆向きの因果や第三の要因を検討しましたか？"
+    },
+    {
+      "code": "I3",
+      "layer": "E",
+      "ja": "分析単位の混同",
+      "en": "Level-of-analysis error",
+      "q": "集計データから、個々の企業・個人について結論していませんか？ その橋渡しの根拠は？"
+    },
+    {
+      "code": "I4",
+      "layer": "E",
+      "ja": "事例選択の偏り",
+      "en": "Selection on the outcome",
+      "q": "成功例以外では、同じ要因はどうなっていますか？"
+    },
+    {
+      "code": "R1",
+      "layer": "F",
+      "ja": "反論・対抗仮説の未検討",
+      "en": "Unaddressed rebuttal",
+      "q": "この説明に対する最も強い対抗仮説は何ですか？ それを退ける根拠は本文にありますか？"
+    },
+    {
+      "code": "R2",
+      "layer": "F",
+      "ja": "論点の歪め(構造的誤謬の確認)",
+      "en": "Structural fallacy prompt",
+      "q": "この箇所は誤った二分法・藁人形・論点先取などになっていませんか？(判定ではなく確認のきっかけ)"
+    },
+    {
+      "code": "O1",
+      "layer": "G",
+      "ja": "節の目的からのずれ",
+      "en": "Off-target content",
+      "q": "この段落は、この節が答えるべき問いにどう貢献しますか？"
+    },
+    {
+      "code": "T0",
+      "layer": "T",
+      "ja": "指導教員のコメント(Word から取り込み)",
+      "en": "Advisor comment (imported from Word)",
+      "q": "このコメントは、どの基準(主張・定義・根拠・論拠など)に関わりますか？ 自分の言葉で対応を書けますか？"
+    },
+    {
+      "code": "T1",
+      "layer": "T",
+      "ja": "指導教員の修正(Word の変更履歴)",
+      "en": "Advisor tracked change (imported from Word)",
+      "q": "この修正の意図は何ですか？ 採るなら自分で原稿を直し、採らないなら理由を返信に書けますか？"
+    }
+  ],
+  "severity": [
+    "必須",
+    "推奨"
+  ],
+  "confidence": [
+    "確定",
+    "要確認"
+  ],
+  "human_actors": [
+    "student",
+    "advisor"
+  ],
+  "agent_reply_kinds": [
+    "question",
+    "howto",
+    "note"
+  ]
+}

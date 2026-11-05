@@ -1,0 +1,21 @@
+name: タスク / Task
+description: 節の執筆・調査・検証などの作業単位
+labels: ["task"]
+body:
+  - type: input
+    id: section
+    attributes:
+      label: 対象の節 / section
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: 終わりの条件(自分の言葉で)/ done when
+    validations:
+      required: true
+  - type: input
+    id: due
+    attributes:
+      label: 期日 / due
+      placeholder: YYYY-MM-DD

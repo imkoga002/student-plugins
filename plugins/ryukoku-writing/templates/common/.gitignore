@@ -1,0 +1,15 @@
+# ryukoku-writing
+# API の応答のキャッシュ・作業用の写し・書き出しは Git に入れない
+.ryukoku/cache/
+*.lock
+proposals/.work/
+build/
+HANDOFF.md
+.rk-base/
+# 原典の抜粋(剽窃の点検用)は、著作権者の許諾がない限り公開しない
+excerpts/*
+!excerpts/README.md
+*.api.json
+__pycache__/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,36 @@
+{
+  "name": "ryukoku-writing",
+  "displayName": "Ryukoku Writing (unofficial)",
+  "version": "1.0.0",
+  "description": "龍谷大学の学生向けのレポート・卒論の執筆支援(非公式。大学の公式の道具ではない)。問い・主張・本文は学生が書き、AI は問いかけ・資料の調査と実在確認・表記の統一の提案・レビューの問いを担う。AI は原稿に書けず、表記の統一も提案ファイルにして学生が一件ずつ採否を決める。VERIFIED・採否・承認・解決・署名は、学生の合言葉から作る Ed25519 の署名でだけ記録され、検査と CI(基準ブランチの道具)が照合する。調査の記録は検索のたびに自動で残る。",
+  "author": {
+    "name": "imkoga002"
+  },
+  "homepage": "https://github.com/imkoga002/student-plugins",
+  "repository": "https://github.com/imkoga002/student-plugins",
+  "license": "MIT",
+  "keywords": ["academic-writing", "thesis", "japanese", "research-integrity", "human-review", "ryukoku", "unofficial"],
+  "userConfig": {
+    "feedback_lang": {
+      "type": "string",
+      "title": "Default feedback language (ja / en)",
+      "description": "新しく初期化するプロジェクトの講評言語の既定(ja か en)。プロジェクトごとの設定は .ryukoku/config.yml の feedback_lang が優先する。/ Default feedback language for new projects; the project's .ryukoku/config.yml takes precedence.",
+      "required": false,
+      "default": "ja"
+    },
+    "crossref_mailto": {
+      "type": "string",
+      "title": "Crossref / DataCite contact e-mail (optional)",
+      "description": "Crossref の polite pool と DataCite の連絡先。既定は空(空でも動く。Plugin に埋め込まない)。/ Optional contact address for Crossref's polite pool and DataCite; empty by default.",
+      "required": false,
+      "default": ""
+    },
+    "cinii_appid": {
+      "type": "string",
+      "title": "CiNii API appid (optional, secret)",
+      "description": "NII の CiNii ウェブ API デベロッパー登録で発行される appid。CiNii Research の検索と CRID の確認に使う。表示・記録しない。/ appid for CiNii Research; never shown or logged.",
+      "required": false,
+      "sensitive": true
+    }
+  }
+}

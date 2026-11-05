@@ -1,0 +1,65 @@
+name: check
+# ryukoku-writing review gate. The pull request is checked with the BASE branch's copy of the tools, so
+# a PR that rewrites tools/ cannot change how it is checked. What it verifies:
+#   - every human decision (VERIFIED, accepted proposal hunks, approved style rules, resolved comments, section
+#     sign-offs, course policy, opt-out) carries an Ed25519 signature by a signer trusted on the BASE branch
+#     (.ryukoku/signers.json there; the PR's own signers are not trusted, not even on the first PR)
+#   - .ryukoku/signoffs.jsonl and .ryukoku/ai-use-log.jsonl only extend the base versions (nothing deleted)
+#   - every change detection in the AI-use log has a signed decision; every changed manuscript file has a
+#     current section sign-off
+#   - tools/, the ./rk launchers, .github/ and .githooks/ are unchanged in the PR unless the student signed a
+#     'guarded pr' confirmation of exactly those changes; signers other than the first one on the base branch must
+#     be endorsed by an already trusted signer
+#   - .claude/settings*.json committed in the PR do not disable the hooks or this plugin
+# Limit: whether a pull_request run uses the workflow file as changed in the PR is unverified; when a PR changes
+# .github/, do not trust its result - read the diff (README).
+# Uses the python3 already on the runner image (standard library only; no setup-python version was checked).
+# actions/checkout@v6 is the version in the xu-cheng/latex-action README example (https://github.com/xu-cheng/latex-action).
+# On a private repository on GitHub Free these checks cannot be made "required" (branch protection needs Pro or
+# above: GitHub Docs, About protected branches, https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches);
+# they still report on every PR.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rk-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check the PR with the base branch's tools
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -eu
+          # a separate checkout of the base branch (git-ignored .rk-base/); its tools check this working tree
+          git worktree add --detach .rk-base "origin/${BASE_REF}"
+          if [ ! -f .rk-base/tools/rk/rk.py ]; then
+            echo "The base branch has no tools/rk/rk.py. Run ./rk setup and commit the project on main first."
+            exit 1
+          fi
+          python3 -I -B .rk-base/tools/rk/rk.py --project "$PWD" check --ci --stage pr --base-ref "origin/${BASE_REF}"
+  pr-checklist:
+    # Every box in the PR body must be ticked: a prompt for the human reviewer, not proof.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Unticked review boxes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -eu
+          if printf '%s\n' "$PR_BODY" | grep -Eq '^[[:space:]]*- \[ \]'; then
+            echo "Unticked items remain in the PR description:"
+            printf '%s\n' "$PR_BODY" | grep -E '^[[:space:]]*- \[ \]'
+            exit 1
+          fi
+          if ! printf '%s\n' "$PR_BODY" | grep -Eq '^[[:space:]]*- \[[xX]\]'; then
+            echo "No review checklist found (use the PR template)."
+            exit 1
+          fi

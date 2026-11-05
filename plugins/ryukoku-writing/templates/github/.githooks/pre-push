@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# pre-push: stop direct pushes to main/master and run
+# ./rk check before pushing. Installed by ./rk setup (git config core.hooksPath .githooks).
+# A push to main needs your confirmation at your own terminal (there is no environment-variable bypass: an AI
+# script could set one). The AI's tool calls have no terminal, so they cannot confirm.
+# A local hook protects only this clone; private-repo branch protection needs GitHub Pro
+# (GitHub Docs, About protected branches, https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
+rc=0
+tomain=0
+while read -r lref lsha rref rsha; do
+  case "${rref:-}" in
+    refs/heads/main|refs/heads/master) tomain=1 ;;
+  esac
+done
+if [ "$tomain" = 1 ]; then
+  if ( : < /dev/tty ) 2>/dev/null && [ -t 1 -o -t 2 ]; then
+    printf '%s\n' "pre-push: main への直接 push。main は CI の信頼の起点(署名者と検査の道具)。" \
+      "  中身(git log origin/main..main と git diff origin/main -- .ryukoku tools .github)を確かめたら yes と打つ: " >&2
+    read -r ans < /dev/tty
+    [ "$ans" = yes ] || { echo "pre-push: 止めた。節の作業はブランチから PR を作る。" >&2; rc=1; }
+  else
+    echo "pre-push: main への直接 push は、自分の端末から確認して行う(端末がないので止めた)。" >&2
+    rc=1
+  fi
+fi
+if [ $rc -eq 0 ] && [ -x ./rk ]; then
+  ./rk check || { echo "pre-push: ./rk check にエラーがある。直してから push する。" >&2; rc=1; }
+fi
+exit $rc

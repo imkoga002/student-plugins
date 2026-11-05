@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>証拠ノート / Evidence notebook</title>
+<style>
+/* Colours, dark mode, focus rings, tab layout. No external resources. */
+:root{--bg:#fbfaf7;--fg:#1d1d1d;--mut:#595959;--line:#c9c6bf;--card:#fff;--acc:#1a56a8;--accfg:#fff;--hl:#fff1a8;--hl2:#e8b84a;--bad:#a4241b;--ok:#1e6b34;--warn:#7a4f00;--add:rgba(30,107,52,.18);--del:rgba(164,36,27,.18)}
+@media (prefers-color-scheme:dark){:root{--bg:#18181a;--fg:#ececec;--mut:#b5b5b5;--line:#4a4a4f;--card:#232326;--acc:#8ab8ff;--accfg:#0b1b33;--hl:#5b5320;--hl2:#b8902a;--bad:#ff9a8f;--ok:#7fd69a;--warn:#f2c26b;--add:rgba(127,214,154,.22);--del:rgba(255,154,143,.22)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 "Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif}
+a{color:var(--acc)}
+.skip{position:absolute;left:-9999px}.skip:focus{left:8px;top:8px;background:var(--card);padding:4px 8px;z-index:20}
+header{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;padding:8px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+header h1{font-size:17px;margin:0}
+button,select,input,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+button{cursor:pointer}button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc)}
+button:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.badge{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:10px;padding:0 8px;margin:0 4px 2px 0;white-space:nowrap}
+.b-ok{border-color:var(--ok);color:var(--ok)}.b-bad{border-color:var(--bad);color:var(--bad)}.b-warn{border-color:var(--warn);color:var(--warn)}
+nav[role=tablist]{display:flex;flex-wrap:wrap;gap:4px;padding:8px 16px 0;border-bottom:1px solid var(--line)}
+nav[role=tablist] button{border-radius:8px 8px 0 0;border-bottom:none}
+nav[role=tablist] button[aria-selected=true]{background:var(--acc);color:var(--accfg);border-color:var(--acc)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;padding:16px;max-width:1500px;margin:0 auto}
+@media (max-width:980px){.layout{grid-template-columns:1fr}}
+section[role=tabpanel]{display:none}section[role=tabpanel].on{display:block}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:14px}
+.panel h2{font-size:15px;margin:0 0 8px}.panel h3{font-size:14px;margin:10px 0 6px}
+.hint{font-size:13px;color:var(--mut)}.warn{color:var(--bad)}
+.item{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:8px 0;background:var(--card)}
+.item .head{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.item .detail{margin-top:6px}
+.decide{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
+pre.src,.diff{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;background:rgba(127,127,127,.08);padding:8px;border-radius:6px;max-height:420px;overflow:auto;margin:4px 0}
+.ins{background:var(--add);text-decoration:underline}.dl{background:var(--del);text-decoration:line-through}
+.diff .a{background:var(--add)}.diff .d{background:var(--del)}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{border-bottom:1px solid var(--line);padding:5px;text-align:left;vertical-align:top}th{font-size:13px;color:var(--mut)}
+textarea{width:100%;min-height:60px;resize:vertical}
+#doc{white-space:pre-wrap;word-break:break-word;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 16px;min-height:40vh;max-height:75vh;overflow:auto}
+mark.hl{background:var(--hl);color:inherit;border-bottom:2px solid var(--hl2)}mark.hl.done{background:transparent;border-bottom:1px dashed var(--mut)}
+aside#basket{position:sticky;top:64px;align-self:start}
+#basketList li{margin:4px 0;font-size:14px}
+#status{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);padding:6px 16px;font-size:14px;min-height:2em;z-index:6}
+#status.bad{color:var(--bad)}
+dialog{max-width:620px;width:calc(100% - 32px);border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+footer{padding:16px 16px 64px;font-size:12px;color:var(--mut);max-width:1500px;margin:0 auto}
+</style>
+</head>
+<body>
+<a class="skip" href="#main" data-t="skip">本文へ移動</a>
+<header>
+  <h1 data-t="title">証拠ノート</h1>
+  <span id="proj" class="hint"></span>
+  <span id="signers" class="badge"></span>
+  <span class="hint" data-t="unofficial">非公式。大学・教員の指示が優先する。</span>
+</header>
+<nav role="tablist" id="tabs" aria-label="tabs"></nav>
+<div class="layout">
+<main id="main" tabindex="-1">
+  <section role="tabpanel" id="p-overview"><div class="panel"><h2 data-t="overviewH">いまの状態</h2><div id="overview"></div></div>
+    <div class="panel"><h2 data-t="howH">この画面の使い方</h2><p data-t="how1">各項目の「表示」で内容(差分・原典の情報・前回の署名からの差分)を確かめると、判断を選べるようになる。選んだ判断は右の「署名する項目」にたまる。</p>
+    <p data-t="how2">最後に「合言葉で署名」を押し、合言葉を一回入れると、選んだ項目がそれぞれの内容のハッシュつきで署名される。合言葉は保存されない。全部をまとめて採用するボタンはない(一件ずつ確かめるため)。</p>
+    <p data-t="how3">原稿や問いはここでは編集しない。自分のエディタで書く。</p></div></section>
+  <section role="tabpanel" id="p-research"><div class="panel"><h2 data-t="questionsH">自分の問い(research/questions.md)</h2><pre class="src" id="questions"></pre>
+    <p class="hint" data-t="questionsHint">問いは自分の言葉で書く(AI は書けない)。検索は、ここにある問いの番号(Q1 など)に結びつけてだけ行われる。</p></div>
+    <div class="panel"><h2 data-t="searchH">検索の記録(research/search-log.jsonl)</h2><div id="searchProblems" class="warn"></div><div style="overflow:auto"><table id="searchTable"></table></div></div>
+    <div class="panel"><h2 data-t="biasH">偏りの点検(ガイドラインⅡ-2(2))</h2><div id="bias"></div></div>
+    <div class="panel"><h2 data-t="thinkingH">思考の記録(thinking/log.md)</h2><pre class="src" id="thinking"></pre></div></section>
+  <section role="tabpanel" id="p-evidence"><div class="panel"><h2 data-t="sourcesH">文献(機械の確認 → 自分で原典を確かめる)</h2>
+    <p class="hint" data-t="sourcesHint">「機械」は識別子と書誌の照合の結果。VERIFIED は自分が現物(原典)を確かめたときだけ選ぶ。</p><div id="sources"></div></div>
+    <div class="panel"><h2 data-t="claimsH">主張と出典</h2><p class="hint" data-t="claimsHint">原典の該当箇所を読み、支えるなら VERIFIED。支えないなら CONTRADICTED にして、主張を原典に合わせて自分で直す(逆はしない)。</p><div id="claims"></div></div></section>
+  <section role="tabpanel" id="p-proposals"><div class="panel"><h2 data-t="proposalsH">提案(表記・書式の統一)</h2><p class="hint" id="whyProposals"></p><div id="proposals"></div></div></section>
+  <section role="tabpanel" id="p-review"><div class="panel"><h2 data-t="reviewH">原稿とコメント</h2>
+    <label><span data-t="docLabel">原稿</span> <select id="docSel"></select></label>
+    <p class="hint" data-t="docHint">本文はここでは編集しない。範囲を選んで、下の欄からコメントを書ける(コメントの作成は署名不要。解決は署名が要る)。</p>
+    <div id="doc" role="document" tabindex="0"></div>
+    <h3 data-t="newComment">選んだ範囲にコメント</h3>
+    <div class="decide"><select id="cCode" aria-label="code"></select><select id="cSev" aria-label="severity"><option>推奨</option><option>必須</option></select>
+      <select id="cActor" aria-label="actor"><option value="student" data-t="studentUnverified">学生(この画面からは本人確認なし)</option></select></div>
+    <textarea id="cText" aria-label="comment"></textarea><button id="cSave" type="button" data-t="saveComment">コメントを保存</button></div>
+    <div class="panel"><h2 data-t="commentsH">コメント</h2><div id="comments"></div></div></section>
+  <section role="tabpanel" id="p-rules"><div class="panel"><h2 data-t="rulesH">記法規則(承認したものだけ使う)</h2><p class="hint" data-t="rulesHint">根拠の資料(要項・シラバス・見本)の該当箇所と照らして決める。</p><div id="rules"></div></div></section>
+  <section role="tabpanel" id="p-changes"><div class="panel"><h2 data-t="changesH">AI のツール実行中に検知した変更</h2><p class="hint" data-t="changesHint">AI は原稿に書かない設計なので、ここに出るものは意図しない変更の可能性が高い。差分を見て、残す・自分の編集だった・戻すを選ぶ。決めるまで検査は通らない。</p><div id="changes"></div></div></section>
+  <section role="tabpanel" id="p-submit"><div class="panel"><h2 data-t="sectionsH">節の署名(前回の署名からの差分を読む)</h2><div id="sections"></div></div>
+    <div class="panel"><h2 data-t="daysH">AI 利用の概要(開示の材料。自分の言葉で)</h2><div id="days"></div></div>
+    <div class="panel"><h2 data-t="checklistH">提出前のチェックリスト</h2><div id="checklist"></div><div id="presubmit"></div></div></section>
+</main>
+<aside id="basket" aria-labelledby="basketH"><div class="panel"><h2 id="basketH" data-t="basketH">署名する項目</h2>
+  <ul id="basketList" aria-live="polite"></ul>
+  <button id="signBtn" class="primary" type="button" disabled data-t="signBtn">合言葉で署名…</button>
+  <p class="hint" data-t="basketHint">合言葉は一回だけ入れる。署名が終わると鍵は捨てられ、保存されない。</p></div></aside>
+</div>
+<dialog id="dlg" aria-labelledby="dlgH"><form method="dialog" id="dlgForm">
+  <h2 id="dlgH" data-t="dlgH">合言葉で署名する</h2>
+  <ul id="dlgList"></ul>
+  <p class="hint" id="dlgCode"></p>
+  <label for="pw" data-t="pwLabel">合言葉(この画面と自分の端末にだけ入れる。チャットには入れない)</label>
+  <input id="pw" type="password" autocomplete="off" required minlength="10" style="width:100%">
+  <div class="decide"><button class="primary" id="dlgOk" value="ok" data-t="dlgOk">署名する</button><button id="dlgCancel" value="cancel" formnovalidate data-t="cancel">やめる</button></div>
+</form></dialog>
+<div id="status" role="status" aria-live="polite"></div>
+<footer data-t="footer">ryukoku-writing(非公式)。この画面は 127.0.0.1 だけで動き、外部に通信しない。人間の判断は、合言葉の署名でだけ記録される。</footer>
+<script>
+"use strict";
+const BOOT = /*__BOOT__*/null;
+const EN = BOOT && BOOT.lang === "en";
+const T = {
+  title:["証拠ノート","Evidence notebook"], unofficial:["非公式。大学・教員の指示が優先する。","Unofficial; your university and instructor take precedence."],
+  skip:["本文へ移動","Skip to content"], overviewH:["いまの状態","Status"], howH:["この画面の使い方","How this page works"],
+  how1:["各項目の「表示」で内容(差分・原典の情報・前回の署名からの差分)を確かめると、判断を選べるようになる。選んだ判断は右の「署名する項目」にたまる。","Open an item with \"Show\" to see its content (diff, source data, changes since your last signature); only then can you choose a decision. Chosen decisions collect in \"Items to sign\"."],
+  how2:["最後に「合言葉で署名」を押し、合言葉を一回入れると、選んだ項目がそれぞれの内容のハッシュつきで署名される。合言葉は保存されない。全部をまとめて採用するボタンはない(一件ずつ確かめるため)。","Then press \"Sign with passphrase\" and enter it once: each chosen item is signed with the hash of its content. The passphrase is not stored. There is no accept-all button: every item is checked one by one."],
+  how3:["原稿や問いはここでは編集しない。自分のエディタで書く。","You do not edit the manuscript or your questions here; write them in your own editor."],
+  questionsH:["自分の問い(research/questions.md)","Your questions (research/questions.md)"], questionsHint:["問いは自分の言葉で書く(AI は書けない)。検索は、ここにある問いの番号(Q1 など)に結びつけてだけ行われる。","You write the questions (the AI cannot). Searches run only for question ids listed here (Q1 ...)."],
+  searchH:["検索の記録(research/search-log.jsonl)","Search log (research/search-log.jsonl)"], biasH:["偏りの点検(ガイドラインⅡ-2(2))","Bias check (guideline II-2(2))"], thinkingH:["思考の記録(thinking/log.md)","Thinking log (thinking/log.md)"],
+  sourcesH:["文献(機械の確認 → 自分で原典を確かめる)","Sources (machine check, then you check the source)"], sourcesHint:["「機械」は識別子と書誌の照合の結果。VERIFIED は自分が現物(原典)を確かめたときだけ選ぶ。","\"Machine\" is the identifier/metadata check. Choose VERIFIED only after checking the item itself."],
+  claimsH:["主張と出典","Claims and sources"], claimsHint:["原典の該当箇所を読み、支えるなら VERIFIED。支えないなら CONTRADICTED にして、主張を原典に合わせて自分で直す(逆はしない)。","Read the passage: VERIFIED if it supports the claim; otherwise CONTRADICTED, and revise the claim to match the source yourself (never the reverse)."],
+  proposalsH:["提案(表記・書式の統一)","Proposals (notation and format)"], reviewH:["原稿とコメント","Manuscript and comments"], docLabel:["原稿","Manuscript"],
+  docHint:["本文はここでは編集しない。範囲を選んで、下の欄からコメントを書ける(コメントの作成は署名不要。解決は署名が要る)。","No editing here. Select a range to comment (writing a comment needs no signature; resolving does)."],
+  newComment:["選んだ範囲にコメント","Comment on the selected range"], student:["学生","student"], advisor:["指導教員","advisor"], advisorCopied:["指導教員の指摘(自分で書き写す・署名なし)","advisor's point (copied by you; not signed)"], studentUnverified:["学生(この画面からは本人確認なし。指導教員のコメントは ./rk import-docx で署名つきで取り込む)","student (no identity check on this screen; advisor comments are imported, signed, with ./rk import-docx)"], saveComment:["コメントを保存","Save comment"],
+  commentsH:["コメント","Comments"], rulesH:["記法規則(承認したものだけ使う)","Style rules (only approved ones apply)"], rulesHint:["根拠の資料(要項・シラバス・見本)の該当箇所と照らして決める。","Compare each with the cited handbook, syllabus or sample."],
+  changesH:["AI のツール実行中に検知した変更","Changes detected during AI tool calls"], changesHint:["AI は原稿に書かない設計なので、ここに出るものは意図しない変更の可能性が高い。差分を見て、残す・自分の編集だった・戻すを選ぶ。決めるまで検査は通らない。","The AI does not write the manuscript, so these are probably unintended. Look at the diff and choose keep / mine / revert. Checks fail until you decide."],
+  sectionsH:["節の署名(前回の署名からの差分を読む)","Section sign-off (read the diff since your last signature)"], daysH:["AI 利用の概要(開示の材料。自分の言葉で)","AI-use summary per day (in your own words)"], checklistH:["提出前のチェックリスト","Pre-submission checklist"],
+  basketH:["署名する項目","Items to sign"], signBtn:["合言葉で署名…","Sign with passphrase…"], basketHint:["合言葉は一回だけ入れる。署名が終わると鍵は捨てられ、保存されない。","Enter the passphrase once. The key is discarded after signing and never stored."],
+  dlgH:["合言葉で署名する","Sign with your passphrase"], pwLabel:["合言葉(この画面と自分の端末にだけ入れる。チャットには入れない)","Passphrase (only on this page or in your terminal; never in the chat)"],
+  dlgOk:["署名する","Sign"], cancel:["やめる","Cancel"], footer:["ryukoku-writing(非公式)。この画面は 127.0.0.1 だけで動き、外部に通信しない。人間の判断は、合言葉の署名でだけ記録される。","ryukoku-writing (unofficial). This page runs on 127.0.0.1 only and makes no external requests. Human decisions are recorded only with a passphrase signature."],
+  show:["表示","Show"], hide:["閉じる","Hide"], add:["署名する項目に入れる","Add to items to sign"], remove:["外す","Remove"], note:["メモ","Note"],
+  mustShow:["先に「表示」で内容を確かめる","Show the content first"], none:["(なし)","(none)"], signed:["署名済み","signed"], unsigned:["署名なし","unsigned"],
+  machine:["機械","machine"], tabs:[["overview","はじめに","Start"],["research","問いと調査","Questions & research"],["evidence","文献と主張","Sources & claims"],["proposals","提案","Proposals"],["review","レビュー","Review"],["rules","記法","Style rules"],["changes","変更の検知","Detected changes"],["submit","提出前","Before submission"]],
+  first:["初めての署名。全文を読む。","First sign-off: read the whole text."], noPrev:["前回の署名時の内容がこの PC にない。全文を読み直す。","The last signed text is not on this computer; reread the whole text."],
+  summary:["その日の概要(自分の言葉で)","Summary of that day (your own words)"], whereHow:["どの部分でどのように(任意)","Where and how (optional)"], suggested:["記録された種類(参考。概要ではない)","Recorded categories (for reference; not a summary)"],
+  presubmitBtn:["提出前の記録を表示","Show the pre-submission record"], allChecked:["全項目を確かめると選べる","Tick every item first"],
+  okSigned:["署名した: ","Signed: "], reason:["選んだ理由","Reason for selecting"], selected:["選んだもの(id をカンマ区切り)","Selected (ids, comma separated)"], save:["保存","Save"]
+};
+const L = k => (T[k] ? T[k][EN ? 1 : 0] : k);
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const DEC = {VERIFIED:["VERIFIED(原典で確かめた)","VERIFIED (checked in the source)"],REJECTED:["使わない","not used"],CONTRADICTED:["CONTRADICTED(支えない)","CONTRADICTED"],NOT_FOUND:["NOT_FOUND(該当箇所がない)","NOT_FOUND"],
+  approved:["承認","approve"],rejected:["却下 / 不採用","reject"],resolved:["解決(自分で対応した)","resolved (I handled it)"],accepted:["採用","accept"],reviewed:["読んで責任を持てる","read; I take responsibility"],
+  confirmed:["確認(自分の言葉の概要)","confirm (my own summary)"],kept_ai:["残す(AI の関与として記録)","keep (record as AI involvement)"],mine:["自分の編集だった","it was my own edit"],reverted:["元に戻す","revert"],ready:["提出前の確認を記録","record the pre-submission check"]};
+const D = d => (DEC[d] ? DEC[d][EN ? 1 : 0] : d);
+let basket = [];
+function status(msg, bad){ const s = $("#status"); s.textContent = msg || ""; s.className = bad ? "bad" : ""; }
+async function api(path, opts){
+  const o = Object.assign({headers:{}}, opts || {});
+  if (o.body !== undefined){ o.method = "POST"; o.headers["Content-Type"] = "application/json"; o.headers["X-RK-Request"] = "1"; o.body = JSON.stringify(o.body); }
+  const r = await fetch(path, o); let j = {}; try { j = await r.json(); } catch(e) {}
+  if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  return j;
+}
+document.documentElement.lang = EN ? "en" : "ja";
+document.querySelectorAll("[data-t]").forEach(e => { e.textContent = L(e.dataset.t); });
+$("#proj").textContent = BOOT.project; $("#whyProposals").textContent = BOOT.why_proposals;
+$("#dlgCode").textContent = (EN ? "Code serving this page: " : "この画面を出しているコード: ") + BOOT.code.root + (EN ? " (version " : "(版 ") + BOOT.code.version + (EN ? "). Check that this is where Claude Code keeps the plugin (see /plugin) before typing the passphrase." : ")。合言葉を入れる前に、ここが Claude Code の Plugin の場所(/plugin で確かめられる)であることを確かめる。");
+BOOT.codes.forEach(c => { const o = document.createElement("option"); o.value = c.code; o.textContent = c.code + " " + (EN ? c.en : c.ja); $("#cCode").appendChild(o); });
+const tabs = $("#tabs");
+T.tabs.forEach(([id, ja, en], i) => {
+  const b = document.createElement("button"); b.type = "button"; b.role = "tab"; b.id = "t-" + id; b.setAttribute("aria-controls", "p-" + id);
+  b.textContent = EN ? en : ja; b.tabIndex = i ? -1 : 0; b.addEventListener("click", () => openTab(id)); tabs.appendChild(b);
+  $("#p-" + id).setAttribute("aria-labelledby", "t-" + id);
+});
+tabs.addEventListener("keydown", e => {
+  const bs = [...tabs.querySelectorAll("button")]; const i = bs.indexOf(document.activeElement);
+  if (e.key === "ArrowRight" || e.key === "ArrowLeft"){ const n = bs[(i + (e.key === "ArrowRight" ? 1 : bs.length - 1)) % bs.length]; n.focus(); n.click(); e.preventDefault(); }
+});
+async function openTab(id){
+  tabs.querySelectorAll("button").forEach(b => { const on = b.id === "t-" + id; b.setAttribute("aria-selected", on); b.tabIndex = on ? 0 : -1; });
+  document.querySelectorAll("section[role=tabpanel]").forEach(p => p.classList.toggle("on", p.id === "p-" + id));
+  try { await LOAD[id](); } catch(e) { status(e.message, true); }
+}
+// ---------------------------------------------------------------- decidable item rows
+// how a comment was made: on this screen (unsigned), imported in the terminal (signed), or by the AI's tool
+function CH(ch){ return ({notebook: EN ? "typed on this screen (not signed, identity not verified)" : "画面で入力(署名なし・本人確認なし)",
+  tty: EN ? "imported in the terminal (signed)" : "端末で取り込み(署名あり)", "agent-cli": EN ? "AI" : "AI"})[ch] || (EN ? "channel not recorded" : "経路の記録なし"); }
+function itemRow(it, opts){
+  opts = opts || {};
+  const d = document.createElement("div"); d.className = "item"; d.dataset.kind = it.kind; d.dataset.id = it.id;
+  const claimed = it.claimed ? `<span class="badge ${it.signed ? "b-ok" : "b-bad"}">${esc(it.claimed)} · ${it.signed ? L("signed") : L("unsigned")}</span>` : "";
+  d.innerHTML = `<div class="head"><strong>${esc(it.label)}</strong>${claimed}${opts.badges || ""}<button type="button" class="show" aria-expanded="false">${L("show")}</button></div><div class="detail" hidden></div>`;
+  const btn = d.querySelector(".show"), det = d.querySelector(".detail");
+  btn.addEventListener("click", async () => {
+    if (!det.hidden){ det.hidden = true; btn.textContent = L("show"); btn.setAttribute("aria-expanded", "false"); return; }
+    try {
+      const v = await api(`/api/view?kind=${encodeURIComponent(it.kind)}&id=${encodeURIComponent(it.id)}`);
+      det.innerHTML = renderView(v) + (opts.noDecide ? "" : decideHTML(v, opts));
+      det.hidden = false; btn.textContent = L("hide"); btn.setAttribute("aria-expanded", "true");
+      if (!opts.noDecide) wireDecide(det, v, it);
+    } catch(e) { status(e.message, true); }
+  });
+  return d;
+}
+function kv(obj, keys){ return "<table>" + keys.filter(k => obj[k] !== undefined && obj[k] !== "").map(k => `<tr><th>${esc(k)}</th><td>${esc(typeof obj[k] === "object" ? JSON.stringify(obj[k]) : obj[k])}</td></tr>`).join("") + "</table>"; }
+function udiff(lines){ return `<div class="diff">${(lines || []).map(l => `<div class="${l[0]==="+"&&!l.startsWith("+++")?"a":l[0]==="-"&&!l.startsWith("---")?"d":""}">${esc(l)}</div>`).join("")}</div>`; }
+function renderView(v){
+  const c = v.content || {};
+  switch (v.kind){
+    case "hunk": {
+      const ctx = a => (a || []).map(x => `<div class="hint">${esc(x)}</div>`).join("");
+      const ops = (v.ops || []).map(([op, a, b]) => op === "equal" ? esc(a) : (a ? `<span class="dl">${esc(a)}</span>` : "") + (b ? `<span class="ins">${esc(b)}</span>` : "")).join("");
+      return `<div class="hint">${esc(c.target)} ${esc(c.line)} · ${esc(c.why)}${c.rule ? " · rule " + esc(c.rule) : ""} · ${esc(c.created)} ${esc(c.model)}</div><div class="diff">${ctx(c.before)}<div>${ops}</div>${ctx(c.after)}</div>`; }
+    case "source": return kv(c, ["id","title","authors","year","doi","isbn","ncid","crid","ndl_id","url","container","machine_status","machine_note","human_note"]);
+    case "claim": return kv(c, ["claim_id","claim","locator","source_id","used_in","source_machine_status","source_human_status"]) + kv(c.source || {}, ["title","authors","year","doi","isbn","ncid","url"]);
+    case "rule": return kv(c, ["id","kind","value","lang","source","page","quote","confidence","note"]);
+    case "comment": return `<div class="quote">「${esc(c.exact)}」</div><p>${esc(c.code)} · ${esc(c.creator)} <span class="badge">${esc(CH(c.channel))}</span>: ${esc(c.comment)}</p>` + (c.replies || []).map(r => `<div class="hint">└ ${esc(r[0])}(${esc(r[1])}): ${esc(r[2])}</div>`).join("");
+    case "change": return `<p>${esc(c.what)} · ${esc(c.path || (c.parts || []).join(", "))} · ${esc(c.tool)} · ${esc(c.ts)}</p>` + (v.diff ? udiff(v.diff) : "") + (c.what === "manuscript" && !v.has_before ? `<p class="hint">${EN ? "No pre-change copy on this computer." : "変更前の写しがこの PC にない(戻す操作はできない)。"}</p>` : "");
+    case "section": return v.first ? `<p class="hint">${L("first")}</p><pre class="src">${esc(v.text)}</pre>` : (v.diff === null ? `<p class="hint">${L("noPrev")}</p><pre class="src">${esc(v.text)}</pre>` : udiff(v.diff) + `<details><summary>${EN ? "full text" : "全文"}</summary><pre class="src">${esc(v.text)}</pre></details>`);
+    case "ailog": return `<p>model: ${esc((v.models || []).join(", ") || "unknown")} · prompts: ${esc(v.prompts)}</p><p class="hint">${(v.areas || []).map(a => esc(a[0]) + "×" + esc(a[1])).join(", ")}</p><p class="hint">${L("suggested")}: ${esc(v.suggested)}</p>`;
+    case "presubmit": return (v.errors && v.errors.length) ? `<ul class="warn">${v.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul>` : `<p class="hint">${esc(v.label)}</p>`;
+    default: return `<pre class="src">${esc(JSON.stringify(c, null, 1))}</pre>`;
+  }
+}
+function decideHTML(v, opts){
+  const decs = (v.decisions || []).filter(x => !(opts.only && opts.only.indexOf(x) < 0));
+  const sel = `<label>${esc(EN ? "Decision" : "判断")} <select class="dec"><option value="">—</option>${decs.map(x => `<option value="${esc(x)}">${esc(D(x))}</option>`).join("")}</select></label>`;
+  let extra = `<label style="flex:1 1 200px">${L("note")} <input class="note" style="width:100%"></label>`;
+  if (v.kind === "ailog") extra = `<label style="flex:1 1 100%">${L("summary")}<textarea class="note"></textarea></label><label style="flex:1 1 100%">${L("whereHow")}<input class="wh" style="width:100%"></label>`;
+  return `<div class="decide">${sel}${extra}<button type="button" class="add">${L("add")}</button></div>`;
+}
+function wireDecide(det, v, it){
+  const addBtn = det.querySelector(".add");
+  if (v.kind === "presubmit"){
+    const upd = () => { addBtn.disabled = checkedIds().length !== BOOT.checklist.length || (v.errors && v.errors.length > 0); addBtn.title = addBtn.disabled ? L("allChecked") : ""; };
+    upd(); document.querySelectorAll(".ck").forEach(c => c.addEventListener("change", upd));
+  }
+  addBtn.addEventListener("click", () => {
+    const dec = det.querySelector(".dec").value; if (!dec) { status(EN ? "Choose a decision" : "判断を選ぶ", true); return; }
+    const note = (det.querySelector(".note") || {}).value || ""; const wh = (det.querySelector(".wh") || {}).value || "";
+    const entry = {kind: v.kind, id: v.id, decision: dec, token: v.token, note: note, where_how: wh, label: v.label};
+    if (v.kind === "presubmit") entry.checklist = checkedIds();
+    basket = basket.filter(b => !(b.kind === v.kind && b.id === v.id)); basket.push(entry); renderBasket();
+    status((EN ? "Added: " : "入れた: ") + v.label + " → " + D(dec));
+  });
+}
+function renderBasket(){
+  const ul = $("#basketList"); ul.innerHTML = "";
+  if (!basket.length){ ul.innerHTML = `<li class="hint">${L("none")}</li>`; }
+  basket.forEach((b, i) => { const li = document.createElement("li"); li.innerHTML = `${esc(b.kind)} ${esc(b.label)} → <strong>${esc(D(b.decision))}</strong> `;
+    const r = document.createElement("button"); r.type = "button"; r.textContent = L("remove"); r.addEventListener("click", () => { basket.splice(i, 1); renderBasket(); }); li.appendChild(r); ul.appendChild(li); });
+  $("#signBtn").disabled = !basket.length;
+}
+$("#signBtn").addEventListener("click", () => {
+  $("#dlgList").innerHTML = basket.map(b => `<li>${esc(b.kind)} ${esc(b.label)} → ${esc(D(b.decision))}</li>`).join("");
+  $("#pw").value = ""; $("#dlg").showModal(); $("#pw").focus();
+});
+$("#dlgForm").addEventListener("submit", async e => {
+  const pw = $("#pw").value; $("#pw").value = "";
+  if (e.submitter && e.submitter.value === "cancel") return;
+  e.preventDefault(); $("#dlg").close();
+  try {
+    const r = await api("/api/sign", {body: {passphrase: pw, items: basket.map(b => ({kind:b.kind, id:b.id, decision:b.decision, token:b.token, note:b.note, where_how:b.where_how, checklist:b.checklist}))}});
+    // one result per item: drop what was signed (or no longer exists) from the basket, keep the rest with the reason
+    const res = r.results || [];
+    const gone = new Set(res.filter(x => x.status === "signed" || /not found|見つからない/.test(x.reason || "")).map(x => x.kind + "|" + x.id));
+    basket = basket.filter(b => !gone.has(b.kind + "|" + b.id));
+    const left = res.filter(x => x.status !== "signed");
+    status(L("okSigned") + r.signed.length + (left.length ? (EN ? " / not signed: " : " / 署名しなかった: ") + left.map(x => x.kind + " " + x.id + ": " + x.reason).join(" / ") : ""), !!left.length);
+    renderBasket(); refresh();
+  } catch(err) { status(err.message, true); }
+});
+let current = "overview";
+function refresh(){ openTab(current); loadState(); }
+async function loadState(){ const s = await api("/api/state"); $("#signers").textContent = (EN ? "signers: " : "署名者: ") + (s.signers.join(", ") || (EN ? "none (run ./rk setup)" : "なし(./rk setup)")); return s; }
+function fill(el, items, opts){ el.innerHTML = ""; if (!items.length){ el.innerHTML = `<p class="hint">${L("none")}</p>`; return; } items.forEach(it => el.appendChild(itemRow(it, opts && opts(it)))); }
+const LOAD = {
+  async overview(){ current = "overview"; const s = await loadState(); const c = s.counts;
+    $("#overview").innerHTML = `<p>${EN ? "Course" : "科目"}: ${esc(s.course || "-")} · ai_policy: <strong>${esc(s.ai_policy)}</strong></p>
+      <p>${EN ? "Waiting" : "判断を待つもの"}: ${EN ? "proposals" : "提案"} ${c.hunks} · ${EN ? "detected changes" : "検知した変更"} ${c.changes} · ${EN ? "open comments" : "未解決コメント"} ${c.comments} · ${EN ? "rules" : "記法規則"} ${c.rules} · ${EN ? "sources" : "文献"} ${c.sources} · ${EN ? "claims" : "主張"} ${c.claims}</p>`
+      + (s.errors.length ? `<h3>NG</h3><ul class="warn">${s.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul>` : `<p class="b-ok badge">check: OK</p>`)
+      + (s.warns.length ? `<h3>${EN ? "Notes" : "注意"}</h3><ul>${s.warns.map(e => `<li>${esc(e)}</li>`).join("")}</ul>` : ""); },
+  async research(){ current = "research"; const r = await api("/api/list?tab=research");
+    $("#questions").textContent = r.questions; $("#thinking").textContent = r.thinking; $("#searchProblems").textContent = (r.problems || []).join(" / ");
+    const rows = r.searchlog.map(x => `<tr><td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.db)}</td><td>${esc(x.query)}</td><td>${x.hits == null ? "?" : esc(x.hits)}</td><td>${esc(x.question_ref)}</td><td>${esc(x.purpose)}</td><td>${esc((x.selected || []).join(", "))}</td><td>${esc(x.reason)}</td></tr>`).join("");
+    $("#searchTable").innerHTML = `<caption class="sr">search log</caption><tr><th>id</th><th>${EN?"date":"日付"}</th><th>DB</th><th>${EN?"query":"検索式"}</th><th>${EN?"hits":"件数"}</th><th>${EN?"question":"問い"}</th><th>${EN?"purpose":"目的"}</th><th>${EN?"selected":"選んだもの"}</th><th>${EN?"reason":"理由"}</th></tr>${rows}`;
+    const b = r.bias; $("#bias").innerHTML = `<p class="hint">sources ${b.sources} · searches ${b.searches} · verified ${b.verified} · purposes ${esc(JSON.stringify(b.purposes))} · languages ${esc(JSON.stringify(b.languages))}</p><ul>${b.questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul>`; },
+  async evidence(){ current = "evidence"; const r = await api("/api/list?tab=evidence");
+    fill($("#sources"), r.sources, it => ({badges: `<span class="badge">${L("machine")}: ${esc(it.machine)}</span>`, noDecide: it.claimed === "VERIFIED" && it.signed}));
+    fill($("#claims"), r.claims, it => ({noDecide: !!it.claimed && it.signed})); },
+  async proposals(){ current = "proposals"; const r = await api("/api/list?tab=proposals"); fill($("#proposals"), r.items); },
+  async review(){ current = "review"; const r = await api("/api/list?tab=comments"); const sel = $("#docSel");
+    if (!sel.options.length){ r.docs.forEach(d => { const o = document.createElement("option"); o.value = o.textContent = d; sel.appendChild(o); }); sel.onchange = loadDoc; }
+    await loadDoc(); fill($("#comments"), r.items.filter(x => !x.claimed || !x.signed), it => ({only: ["resolved"], badges: `<span class="badge">${esc(it.severity || "")}</span>`})); },
+  async rules(){ current = "rules"; const r = await api("/api/list?tab=rules"); fill($("#rules"), r.items, it => ({noDecide: !!it.claimed})); },
+  async changes(){ current = "changes"; const r = await api("/api/list?tab=changes"); fill($("#changes"), r.items); },
+  async submit(){ current = "submit"; const r = await api("/api/list?tab=submit");
+    fill($("#sections"), r.sections.filter(s => !s.current));
+    if (!r.sections.filter(s => !s.current).length) $("#sections").innerHTML = `<p class="hint">${EN ? "All sections are signed for their current content." : "すべての節が、今の内容で署名済み。"}</p>`;
+    fill($("#days"), r.days.filter(d => !d.confirmed));
+    $("#checklist").innerHTML = BOOT.checklist.map(c => `<label style="display:block"><input type="checkbox" class="ck" value="${esc(c.id)}"> ${esc(EN ? c.en : c.ja)}</label>`).join("");
+    const ps = $("#presubmit"); ps.innerHTML = "";
+    if (r.presubmit.current) { ps.innerHTML = `<p class="badge b-ok">${EN ? "pre-submission record is current" : "提出前の記録は今の内容で署名済み"}</p>`; return; }
+    ps.appendChild(itemRow({kind: "presubmit", id: "submission", label: L("presubmitBtn"), claimed: ""})); }
+};
+function checkedIds(){ return [...document.querySelectorAll(".ck:checked")].map(c => c.value); }
+async function loadDoc(){
+  const p = $("#docSel").value; if (!p){ $("#doc").textContent = L("none"); return; }
+  const d = await api("/api/doc?path=" + encodeURIComponent(p)); const a = await api("/api/annotations?doc=" + encodeURIComponent(p));
+  const text = d.text; const marks = a.items.map(x => x.review.anchor).filter(x => x && x.start != null && x.end != null && x.state !== "orphan").sort((x, y) => x.start - y.start);
+  let html = "", pos = 0; a.items.forEach((x, i) => { const an = x.review.anchor; if (an) an._done = x.review.status === "resolved"; });
+  marks.forEach(m => { if (m.start < pos) return; html += esc(text.slice(pos, m.start)) + `<mark class="hl${m._done ? " done" : ""}">${esc(text.slice(m.start, m.end))}</mark>`; pos = m.end; });
+  $("#doc").innerHTML = html + esc(text.slice(pos));
+}
+function selectionOffsets(){
+  const s = window.getSelection(); const docEl = $("#doc"); if (!s.rangeCount) return null;
+  const r = s.getRangeAt(0); if (!docEl.contains(r.startContainer) || !docEl.contains(r.endContainer) || r.collapsed) return null;
+  const pre = document.createRange(); pre.selectNodeContents(docEl); pre.setEnd(r.startContainer, r.startOffset);
+  const start = pre.toString().length; return {start: start, end: start + r.toString().length};
+}
+let lastSel = null; document.addEventListener("selectionchange", () => { const o = selectionOffsets(); if (o) lastSel = o; });
+$("#cSave").addEventListener("click", async () => {
+  if (!lastSel){ status(EN ? "Select a range in the manuscript first" : "先に原稿の範囲を選ぶ", true); return; }
+  try { await api("/api/annotations", {body: {doc: $("#docSel").value, start: lastSel.start, end: lastSel.end, code: $("#cCode").value, severity: $("#cSev").value, comment: $("#cText").value, actor: $("#cActor").value}});
+    $("#cText").value = ""; lastSel = null; status(EN ? "Comment saved" : "コメントを保存した"); LOAD.review(); } catch(e) { status(e.message, true); }
+});
+renderBasket(); openTab("overview");
+</script>
+</body>
+</html>

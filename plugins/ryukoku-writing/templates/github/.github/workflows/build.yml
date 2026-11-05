@@ -1,0 +1,22 @@
+name: build
+# Markdown -> docx with a pinned pandoc (pandoc/actions/setup@v1: https://github.com/pandoc/actions). Outputs are artifacts.
+on:
+  pull_request:
+    paths: ["manuscript/**", "pandoc/**", "sources/references.json", ".github/workflows/build.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  docx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pandoc/actions/setup@v1
+        with:
+          version: "3.13"
+      - name: Markdown to docx (east_asian_line_breaks, citeproc, reference.docx)
+        run: python3 tools/rk/rk.py export docx
+      - uses: actions/upload-artifact@v6
+        with:
+          name: manuscript-docx
+          path: build/manuscript.docx

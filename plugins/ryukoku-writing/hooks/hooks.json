@@ -1,0 +1,23 @@
+{
+  "description": "ryukoku-writing: active only for a folder that carries .ryukoku/config.yml (found from the target path, the session folder or one or two levels below it). Deny AI writes to the manuscript, .ryukoku/, the tools, the student's questions and thinking log, with every tool including Bash; detect changes made during AI tool calls (msguard) and log them in the chained AI-use log; stop prompts that contain personal data; add reasons and alternatives for ghostwriting and question-delegation requests; log searches automatically; apply the course AI policy to tools.",
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup|resume|clear|compact",
+        "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.sh\"", "timeout": 20 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/prompt-guard.sh\"", "timeout": 10 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "*",
+        "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-guard.sh\"", "timeout": 20 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*",
+        "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-log.sh\"", "timeout": 20 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-check.sh\"", "timeout": 15 } ] }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.DS_Store
+# a private list of words that must never appear in the plugin (see plugins/ryukoku-writing/tests/test_init_export.py)
+private-terms.txt

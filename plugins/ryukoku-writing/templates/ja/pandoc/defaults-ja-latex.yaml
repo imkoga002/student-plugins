@@ -1,0 +1,12 @@
+# Markdown -> LaTeX ソース(提出先が LaTeX を求めるとき)。
+from: markdown+east_asian_line_breaks
+to: latex
+standalone: true
+citeproc: true
+bibliography: sources/references.json
+variables:
+  documentclass: ltjsarticle
+  papersize: a4
+# lang は設定しない: lang があると pandoc の LaTeX テンプレートが babel を読み込み、babel と jlreq / LuaTeX-ja の組み合わせは未確認のため。
+# lang is deliberately not set: with lang, pandoc's LaTeX template loads babel, and babel with jlreq / LuaTeX-ja is unverified.
+# (pandoc templates, common.latex: https://github.com/jgm/pandoc/blob/main/data/templates/common.latex)

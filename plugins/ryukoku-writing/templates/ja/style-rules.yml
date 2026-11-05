@@ -1,0 +1,24 @@
+# 記法規則の提案(学生が画面か ./rk style で一件ずつ署名して承認するまで適用しない)。
+# 下は Plugin が用意した「選択肢の確認用」の候補で、どの大学・学部の規程でもない。
+# 自分の学部・科目の執筆要項や教員の指示で確かめ、合わなければ却下するか値を直して承認する。
+# 国の表記の基準(公用文作成の考え方 等)は学術文を拘束しない既定値にとどまる。「公用文作成の考え方」(文化審議会建議、2022)は
+# 政府の公用文の手引で(https://www.bunka.go.jp/seisaku/bunkashingikai/kokugo/hokoku/pdf/93731901_01.pdf)、常用漢字表の前書きは
+# 専門分野や個々人の表記にまで及ぼすものではないとする(https://www.bunka.go.jp/kokugo_nihongo/sisaku/joho/joho/kijun/naikaku/pdf/joyokanjihyo_20101130.pdf)。
+version: 1
+rules:
+  - id: "punct"
+    kind: "punctuation"
+    value: "、。"
+    lang: "ja"
+    source: "Plugin の候補(根拠なし。学部の執筆要項・教員の指示で確認する)"
+    confidence: "low"
+    status: "proposed"
+    note: "句読点の組は「、。」「，。」「，．」から学部の指定で選ぶ"
+  - id: "ending"
+    kind: "ending_style"
+    value: "である"
+    lang: "ja"
+    source: "Plugin の候補(根拠なし。学部の執筆要項・教員の指示で確認する)"
+    confidence: "low"
+    status: "proposed"
+    note: "文体を一つにそろえる(混在させない)"

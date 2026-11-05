@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# pre-commit (ryukoku-writing): run ./rk check before each commit, so an unsigned human state, an undecided change
+# detection or a broken AI-use log is noticed before it enters the history. Installed by ./rk setup
+# (git config core.hooksPath .githooks). A local hook protects only this clone.
+if [ -x ./rk ]; then
+  ./rk check >/dev/null 2>&1 || { echo "pre-commit: ./rk check にエラーがある(./rk check で内容を見る)。/ ./rk check reports errors." >&2; exit 1; }
+fi
+exit 0

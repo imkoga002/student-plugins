@@ -1,0 +1,23 @@
+#!/bin/sh
+# ./rk - the command of a ryukoku-writing project (unofficial; not a Ryukoku University tool). ./rk help
+# The same file in every project; do not edit (the plugin's hooks block AI edits, and changes are detected).
+# It runs the code of the INSTALLED plugin, whose location Claude Code's SessionStart hook records outside this
+# project (~/.ryukoku-writing/plugin-root). Before any passphrase prompt that code prints where it runs and its
+# version, and refuses when it is not the plugin Claude Code last recorded (location and MANIFEST; see README
+# "保証しないこと" for what this cannot prevent). Only when the plugin cannot be found does it fall back to the
+# project copy in tools/, which refuses the human-only commands (setup, apply, verify, ... notebook).
+D=$(cd "$(dirname "$0")" && pwd)
+H="${RK_STATE_HOME:-$HOME/.ryukoku-writing}"
+R=""
+[ -f "$H/plugin-root" ] && R=$(head -n 1 "$H/plugin-root")
+# a Python 3 that really runs (on Windows "python3" can be a stub that exists but does not run)
+PY=""
+for c in python3 python; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(sys.version_info[0] != 3)' >/dev/null 2>&1; then PY="$c"; break; fi
+done
+if [ -z "$PY" ] && command -v py >/dev/null 2>&1 && py -3 -c 'import sys' >/dev/null 2>&1; then PY="py -3"; fi
+[ -n "$PY" ] || { echo "Python 3 が必要です(https://www.python.org/)/ Python 3 is required" >&2; exit 1; }
+if [ -n "$R" ] && [ -f "$R/scripts/rk/rk.py" ]; then
+  exec $PY -I -B "$R/scripts/rk/rk.py" --project "$D" "$@"
+fi
+exec $PY -I -B "$D/tools/rk/rk.py" --project "$D" "$@"
