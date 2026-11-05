@@ -1,4 +1,15 @@
-"""Human sign-off: one mechanism behind every "a person confirmed this" state.
+"""Human records: every "a person confirmed this" state, and the two of them that need the passphrase.
+
+Two kinds of record live side by side in .ryukoku/signoffs.jsonl:
+- Signed records (the passphrase): only the declarations whose forgery would let unchecked material count as
+  checked - VERIFIED for a source or a claim ("I read the original") and the final pre-submission confirmation
+  ("the content and the AI-use disclosure are correct"). NEEDS_SIGNATURE lists them.
+- Light confirmations (a button on the evidence notebook, or a key at the terminal): every other decision (claim
+  cards, resolved comments, approved style rules, proposals, section reading, course policy, opt-out, daily
+  summaries, decisions on detected changes). They carry no signature: "sig" is empty and the id is the hash of
+  the record. They are protected the way the rest of .ryukoku/ is: the hooks deny AI writes there, the tool-window
+  detection reports an unsigned record that appears during an AI tool call, and CI requires the file to extend the
+  base branch. A record that claims one of the signed decisions without a valid signature is an error.
 
 - A signer is a person with a passphrase (合言葉). The Ed25519 secret is derived from it with PBKDF2-HMAC-SHA256
   and a per-signer salt, so no private key file exists anywhere. Only the public key, the salt and the
@@ -29,6 +40,13 @@ ROLES = ("student", "advisor", "peer")
 SIGNERS_REL = os.path.join(".ryukoku", "signers.json")
 SIGNOFFS_REL = os.path.join(".ryukoku", "signoffs.jsonl")
 SIGNED_FIELDS = ("v", "kind", "subject", "decision", "digest", "detail", "role", "key", "signer", "ts", "method", "note")
+NEEDS_SIGNATURE = {("source", "VERIFIED"), ("claim", "VERIFIED"), ("presubmit", "ready")}
+LIGHT_METHODS = ("tty", "notebook")
+
+
+def needs_signature(kind, decision):
+    """True for the decisions that need the passphrase (VERIFIED and the final pre-submission confirmation)."""
+    return (kind, decision) in NEEDS_SIGNATURE
 
 
 class SignError(RkError):
@@ -229,8 +247,33 @@ def make_record(signer, secret, kind, subject, decision, digest, detail=None, me
     return rec
 
 
+def make_confirmation(kind, subject, decision, digest, detail=None, method="tty", note="", name="student", role="student"):
+    """A light confirmation (no passphrase): the record is bound to the content digest like a signed one, but its
+    integrity rests on the hooks, the tool-window detection and CI, not on a signature."""
+    if needs_signature(kind, decision):
+        raise SignError("%s %s には合言葉の署名が要る / %s %s needs the passphrase signature" % (kind, decision, kind, decision))
+    rec = {"v": 2, "kind": kind, "subject": subject, "decision": decision, "digest": digest, "detail": detail or {},
+           "role": role, "key": "", "signer": name or "student", "ts": now_iso(), "method": method, "note": (note or "")[:1000]}
+    rec["sig"] = ""
+    rec["id"] = "CF-" + sha256_bytes(payload(rec))[:16]
+    return rec
+
+
+def is_light(rec):
+    return not rec.get("sig")
+
+
 def verify_record(rec, signers):
-    """(ok, reason). SIGNERS must be the *trusted* set (trust.py)."""
+    """(ok, reason). SIGNERS must be the *trusted* set (trust.py). A light confirmation is accepted for every
+    decision except the signed ones, when its id matches its content."""
+    if is_light(rec):
+        if needs_signature(rec.get("kind"), rec.get("decision")):
+            return False, "この判断(%s %s)には合言葉の署名が要るのに、署名がない / needs a passphrase signature" % (rec.get("kind"), rec.get("decision"))
+        if rec.get("method") not in LIGHT_METHODS:
+            return False, "確認の経路 %r が不明 / unknown method" % rec.get("method")
+        if rec.get("id") != "CF-" + sha256_bytes(payload(rec))[:16]:
+            return False, "確認の記録の id が内容と合わない(書き換えの可能性) / record id does not match its content"
+        return True, ""
     s = signers.get(rec.get("key"))
     if not s:
         return False, "unknown signer key %s(信頼された署名者でない)" % rec.get("key")

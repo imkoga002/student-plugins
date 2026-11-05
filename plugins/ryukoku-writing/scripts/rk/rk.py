@@ -14,14 +14,14 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from rklib import (argmap, check, criticmarkup, datacheck, disclosure, docx_comments, export, ledger,  # noqa: E402
-                   overlap, proposals, refcheck, search, searchlog, sign, style, subjects, trust)
+from rklib import (argmap, check, claimcards, criticmarkup, datacheck, disclosure, docx_comments, export, ledger,  # noqa: E402
+                   overlap, proposals, provenance, refcheck, search, searchlog, sign, style, subjects, trust, verification)
 from rklib.common import (RkError, append_jsonl, feedback_lang, find_project, is_inside, load_config,  # noqa: E402
                           manuscript_files, now_iso, read_text, safe_rel, sha256_bytes, tr)
 
-HUMAN = ("setup", "apply", "verify", "style", "resolve", "signoff", "disclose", "changes", "optout", "import-docx",
+HUMAN = ("setup", "confirm", "apply", "verify", "style", "resolve", "signoff", "disclose", "changes", "optout", "import-docx",
          "sign", "trust", "update-tools")
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 
 def out(*a):
@@ -44,33 +44,35 @@ def model_name(proj):
 HELP_JA = """rk - ryukoku-writing の道具(非公式。大学・教員の指示が優先する)
 
 最初に一度だけ(自分の端末で):
-  ./rk setup            合言葉の登録、科目の AI 利用条件、オプトアウトの確認、Git の選択
+  ./rk setup            科目の AI 利用条件、オプトアウトの確認、合言葉(今でも後でも)、Git の選択
 
-判断はまとめて画面で(おすすめ): Claude に「証拠ノートを開いて」と頼むか、./rk notebook
-  画面で項目を一つずつ表示して確かめ、選んだものを合言葉一回で署名する。
-端末で一件ずつ決めることもできる(どれも最後に合言葉を一回入れる):
-  ./rk apply            AI の提案(表記・書式の統一)を一か所ずつ見て、採用 y / 不採用 n
-  ./rk verify           原典を読んで、文献・主張に VERIFIED などを付ける
+判断は画面で(おすすめ): Claude に「証拠ノートを開いて」と頼むか、./rk notebook
+  項目を一つずつ表示して確かめ、ボタンで記録する。合言葉が要るのは VERIFIED と提出前の最終確認だけ。
+端末で一件ずつ決めることもできる:
+  ./rk confirm          主張カードを読み、自分の主張なら確認する(キー一つ)
+  ./rk verify           原典を読んで、文献・主張に VERIFIED などを付ける(VERIFIED は合言葉の署名)
+  ./rk signoff          提出前: 由来と開示文を読み、チェックリストを確かめ、合言葉で最終確認に署名する
+  ./rk apply            表記・書式の提案を一か所ずつ見て、採用 y / 不採用 n
   ./rk style            抽出された記法規則を一件ずつ承認する(承認したものだけ使う)
   ./rk resolve          レビューコメントの解決
-  ./rk changes          AI のツール実行中に検知した変更を、残す・自分の編集だった・戻すで決める
-  ./rk disclose         AI 利用の概要を日ごとに自分の言葉で書く(開示の材料)
-  ./rk signoff          提出前: 節ごとに前回の署名からの差分を読んで署名し、チェックリストを確かめる
+  ./rk changes          守られているファイル(道具・設定・記録)の変更の検知を判断する
+  ./rk disclose         AI 利用の概要を日ごとに自分の言葉で書く
   ./rk optout           学習へのオプトアウトの確認を記録する
   ./rk import-docx F --doc manuscript/X.md   指導教員が Word に入れたコメントを取り込む
   ./rk trust            別の PC で、署名者の指紋を照らして信頼する
-誰が使ってもよい: ./rk check(検査。CI と同じ)、./rk status、./rk facts(開示の事実の一覧)
+誰が使ってもよい: ./rk check(検査。CI と同じ)、./rk status、./rk facts(開示の事実の一覧と由来)
 合言葉は端末と、ローカルの画面にだけ入れる。チャットや AI には決して入れない。"""
 HELP_EN = """rk - ryukoku-writing tool (unofficial; your university and instructor take precedence)
 
 Once, in your own terminal:
-  ./rk setup            passphrase, course AI policy, opt-out check, Git
+  ./rk setup            course AI policy, opt-out check, passphrase (now or later), Git
 
-Decide in one go on the screen (recommended): ask Claude to "open the evidence notebook", or ./rk notebook.
-  Open each item, check it, choose, and sign the chosen items with one passphrase entry.
-Or decide item by item in the terminal (each ends with one passphrase entry):
-  ./rk apply / verify / style / resolve / changes / disclose / signoff / optout / import-docx / trust
-Anyone: ./rk check (same as CI), ./rk status, ./rk facts (facts for the AI-use disclosure)
+Decide on the screen (recommended): ask Claude to "open the evidence notebook", or ./rk notebook.
+  Open each item, check it and record it with a button. Only VERIFIED and the final pre-submission confirmation
+  need the passphrase.
+Or item by item in the terminal:
+  ./rk confirm / verify / signoff / apply / style / resolve / changes / disclose / optout / import-docx / trust
+Anyone: ./rk check (same as CI), ./rk status, ./rk facts (facts for the AI-use disclosure, with provenance)
 Type the passphrase only into your terminal or the local page. Never into the chat or to the AI."""
 
 
@@ -102,16 +104,134 @@ def cmd_status(proj, a):
     idx, _b = sign.valid_index(proj, trusted)
     from rklib import msguard
     cl = subjects.claims(proj)
-    out(L(proj, "提案の未判断: %d か所  主張: %d 件(VERIFIED %d)  未解決コメント: %d  検知した変更(未判断): %d  署名者: %d",
-          "undecided proposal hunks: %d  claims: %d (VERIFIED %d)  open comments: %d  undecided detections: %d  signers: %d")
-        % (len(subjects.hunks(proj)), len(cl), sum(1 for c in cl if c.claimed == "VERIFIED"),
-           len([c for c in subjects.comments(proj) if not c.claimed]), len(msguard.pending(proj, idx)), len(trusted)))
+    cards = subjects.cards(proj)
+    sm = provenance.summary(proj)
+    out(L(proj, "主張カード: %d 件(学生の確認済み %d)  提案の未判断: %d か所  台帳の主張: %d 件(VERIFIED %d)  未解決コメント: %d  検知した変更(未判断): %d  署名者: %d  "
+             "AI が書いた・直した段落: %d / %d",
+          "claim cards: %d (confirmed %d)  undecided proposal hunks: %d  ledger claims: %d (VERIFIED %d)  open comments: %d  undecided detections: %d  "
+          "signers: %d  AI-written or revised paragraphs: %d / %d")
+        % (len(cards), sum(1 for c in cards if sign.current(idx, "card", c.sid, c.digest)), len(subjects.hunks(proj)), len(cl),
+           sum(1 for c in cl if c.claimed == "VERIFIED"), len([c for c in subjects.comments(proj) if not c.claimed]),
+           len(msguard.pending(proj, idx)), len(trusted), sm["by_origin"]["ai_wrote"][0] + sm["by_origin"]["ai_edited"][0], sm["paragraphs"]))
     return 0
 
 
 def cmd_facts(proj, a):
     txt, _ = disclosure.facts(proj, feedback_lang(proj))
     out(txt)
+    return 0
+
+
+# ===================================================================== claim cards / provenance / verification
+def cmd_claims(proj, a):
+    lang = feedback_lang(proj)
+    trusted, _p, _n = trust.local_trusted(proj)
+    idx, _b = sign.valid_index(proj, trusted)
+    if a.sub == "new":
+        words = a.words if a.words is not None else sys.stdin.read()
+        cid, p = claimcards.new_card(proj, words, "en" if load_config(proj).get("manuscript_lang", "ja").startswith("en") else "ja")
+        out(L(proj, "主張カード %s を作った: %s(学生の言葉の原文だけが入っている。主張・範囲などは学生の言葉から起こし、AI が足すものには [ai_suggested] を付ける。"
+                    "学生の確認は、証拠ノートの「主張カード」のボタンか ./rk confirm で学生が行う)",
+              "made claim card %s: %s (only the student's own words are in it; draft the claim and scope from those words and mark "
+              "what you add with [ai_suggested]; the student confirms it on the notebook's 'Claim cards' tab or with ./rk confirm)") % (cid, os.path.relpath(p, proj)))
+        return 0
+    rc = 0
+    for s in subjects.cards(proj):
+        c = claimcards.find(proj, s.sid)
+        probs = claimcards.problems(c, lang)
+        state = "confirmed" if sign.current(idx, "card", s.sid, s.digest) else ("stale" if sign.latest(idx, "card", s.sid) else "draft")
+        if a.sub == "list":
+            out("%s  %-9s  %s%s" % (s.sid, state, s.label, ("  " + L(proj, "問題: ", "problems: ") + "; ".join(probs)) if probs else ""))
+        elif a.sub == "lint":
+            for x in probs:
+                out("NG %s: %s" % (s.sid, x))
+                rc = 1
+            if c["status"] == "confirmed" and state != "confirmed":
+                out("NG %s: %s" % (s.sid, L(proj, "status: confirmed と書かれているが、学生の確認の記録がない(AI は確認を付けない)",
+                                            "says status: confirmed but there is no record of the student's confirmation (the AI never confirms)")))
+                rc = 1
+    if a.sub == "lint":
+        out(L(proj, "主張カードの検査: %s", "claim card check: %s") % ("NG" if rc else "OK"))
+    return rc
+
+
+def cmd_provenance(proj, a):
+    if a.sub == "materials":
+        full, r = safe_rel(proj, a.file, "manuscript/")
+        trusted, _p, _n = trust.local_trusted(proj)
+        idx, _b = sign.valid_index(proj, trusted)
+        claims = [c.strip() for c in (a.claims or "").split(",") if c.strip()]
+        bad = []
+        for cid in claims:
+            c = claimcards.find(proj, cid)
+            if c is None or not sign.current(idx, "card", cid, claimcards.digest(c)):
+                bad.append(cid)
+        if bad:
+            raise RkError(L(proj, "材料の主張カード %s が学生の確認済みでない(draft か、確認の後に変わった)。執筆の材料は学生が確認した主張カードだけ。"
+                                  "学生に証拠ノートの「主張カード」か ./rk confirm で確かめてもらう",
+                            "claim card(s) %s are not confirmed by the student (draft, or changed after confirmation). Only confirmed cards are "
+                            "drafting material; ask the student to confirm them on the notebook or with ./rk confirm") % ", ".join(bad))
+        srcs = [x.strip() for x in (a.sources or "").split(",") if x.strip()]
+        reg = {row.get("id"): row for row in ledger.read(ledger.paths(proj)[0], ledger.REGISTER)}
+        miss = [x for x in srcs if x not in reg]
+        if miss:
+            raise RkError(L(proj, "材料の文献 %s が台帳にない(台帳にない文献は使わない)", "source(s) %s are not in the ledger (do not use them)") % ", ".join(miss))
+        data = [x.strip() for x in (a.data or "").split(",") if x.strip()]
+        for d in data:
+            safe_rel(proj, d, "data/")
+            if not os.path.isfile(os.path.join(proj, d)):
+                raise RkError(L(proj, "材料のデータ %s がない", "data file %s does not exist") % d)
+        m = provenance.set_materials(proj, r, claims, srcs, data, a.purpose)
+        out(L(proj, "%s の次の書き込みの材料を記録した: 主張カード %s / 文献 %s / データ %s / 用途 %s。書き込むと段落ごとの由来に入る。"
+                    "材料にない主張・数字・文献は本文に足さない(足したいものは本文の外に『追加の提案』として列挙する)",
+              "recorded the materials of the next write to %s: claim cards %s / sources %s / data %s / purpose %s. They go into each "
+              "paragraph's provenance. Add no claim, figure or source beyond them (list wishes outside the text as 'additional suggestions')")
+            % (r, ", ".join(m["claims"]) or "-", ", ".join(m["sources"]) or "-", ", ".join(m["data"]) or "-", m["purpose"]))
+        return 0
+    if a.sub == "show":
+        att = provenance.attribution(proj)
+        for f, rows in att.items():
+            if a.file and f != a.file:
+                continue
+            out(f)
+            for r in rows:
+                e = r["entry"] or {}
+                mats = e.get("materials") or {}
+                out("  L%d-%d  %-16s %s%s" % (r["start"], r["end"], r["origin"], (r["section"] or "-")[:30],
+                                             ("  " + ",".join((mats.get("claims") or []) + (mats.get("sources") or []))) if mats else ""))
+        return 0
+    if a.sub == "sync":
+        n = len(provenance.sync_student(proj))
+        out(L(proj, "学生の編集(推定)として記録した段落: %d", "paragraphs recorded as the student's edits (estimated): %d") % n)
+        return 0
+    probs = provenance.verify(proj, local=True, lang=feedback_lang(proj))
+    for p in probs:
+        out("NG " + p)
+    out(L(proj, "由来の記録: 問題 %d 件", "provenance log: %d problem(s)") % len(probs))
+    return 1 if probs else 0
+
+
+def cmd_verification(proj, a):
+    lang = feedback_lang(proj)
+    if a.sub == "scaffold":
+        path, mech = verification.scaffold(proj, a.target, lang)
+        out(L(proj, "検証のひな形を作った: %s(0. 機械の照合 %d 件)。1〜5 を claim-verifier の手順で埋め、6 に修正案を書く。"
+                    "最後に 'rk.py verification lint %s' で形式を確かめる",
+              "made the verification scaffold: %s (%d mechanical finding(s) in section 0). Fill 1-5 following the claim-verifier, put "
+              "revisions in 6, then check the form with 'rk.py verification lint %s'") % (os.path.relpath(path, proj), len(mech), os.path.relpath(path, proj)))
+        for x in mech[:20]:
+            out("  " + x)
+        return 0
+    if a.sub == "lint":
+        errs, warns = verification.lint(proj, a.file, lang)
+        for e in errs:
+            out("NG " + e)
+        for w in warns:
+            out(L(proj, "注意 ", "WARN ") + w)
+        out(L(proj, "検証の形式: エラー %d / 注意 %d", "verification form: %d error(s) / %d warning(s)") % (len(errs), len(warns)))
+        return 1 if errs else 0
+    for p in verification.files(proj):
+        out(os.path.relpath(p, proj))
     return 0
 
 
@@ -194,8 +314,8 @@ def cmd_propose(proj, a):
             made += 1
             out(L(proj, "提案 %s を作った(%d か所): %s", "made proposal %s (%d hunk(s)): %s") % (meta["id"], n, os.path.relpath(path, proj)))
         if not made and a.sub == "style" and not rules:
-            out(L(proj, "承認済みの記法規則がない(学生が署名して承認するまで、規則は適用しない)。",
-                  "No approved style rules (rules apply only after the student signs their approval)."))
+            out(L(proj, "承認済みの記法規則がない(学生が承認するまで、規則は適用しない)。",
+                  "No approved style rules (rules apply only after the student approves them)."))
         return 0
     return 2
 
@@ -216,6 +336,12 @@ def cmd_lint(proj, a):
         for path, line, rid, why in style.lint(t, rules, os.path.relpath(f, proj)):
             out("%s:%d [%s] %s" % (path, line, rid, why))
             n += 1
+    from rklib import verification as _v
+    for f in files:
+        relp = os.path.relpath(f, proj).replace(os.sep, "/")
+        for ln, tok in _v.numbers_without_source(proj, read_text(f), relp):
+            out(L(proj, "%s:%d [数字] 「%s」に出典の引用もデータの参照もない", "%s:%d [figure] \"%s\" has no citation or data reference") % (relp, ln, tok))
+            n += 1
     total, lens = style.length_report(texts, rules)
     out(L(proj, "本文の字数(空白・見出し・表・コードを除く概算): %d", "text length (approx., without spaces, headings, tables, code): %d") % total)
     for rid, kind, lim, _tot, bad in lens:
@@ -223,8 +349,8 @@ def cmd_lint(proj, a):
     _t, prop = style.load(style.proposed_path(proj))
     if prop:
         out("未承認のため適用していない規則: %s(学生が画面か ./rk style で承認)" % ", ".join(r.get("id", "?") for r in prop))
-    out(L(proj, "lint: 指摘 %d 件。直すのは本人(機械的な置換は 'rk.py propose style' で提案にできる)",
-          "lint: %d findings. The student fixes them (mechanical replacements can be proposed with 'rk.py propose style')") % n)
+    out(L(proj, "lint: 指摘 %d 件(機械的な置換は 'rk.py propose style' で提案にもできる)",
+          "lint: %d findings (mechanical replacements can also be proposed with 'rk.py propose style')") % n)
     return 1 if n else 0
 
 
@@ -528,6 +654,17 @@ def build_parser():
     s = sub.add_parser("check"); s.add_argument("--submit", action="store_true"); s.add_argument("--ci", action="store_true")
     s.add_argument("--stage", default="draft", choices=["draft", "pr", "submit"]); s.add_argument("--base-ref")
     sub.add_parser("status"); sub.add_parser("facts"); sub.add_parser("bundle")
+    s = sub.add_parser("claims"); cs = s.add_subparsers(dest="sub", required=True)
+    x = cs.add_parser("new"); x.add_argument("--words", help="the student's own words, verbatim (stdin when omitted)")
+    cs.add_parser("list"); cs.add_parser("lint")
+    s = sub.add_parser("provenance"); pv = s.add_subparsers(dest="sub", required=True)
+    x = pv.add_parser("materials"); x.add_argument("--file", required=True); x.add_argument("--claims"); x.add_argument("--sources")
+    x.add_argument("--data"); x.add_argument("--purpose", default="draft", choices=["draft", "revise", "format", "translate"])
+    x = pv.add_parser("show"); x.add_argument("--file")
+    pv.add_parser("sync"); pv.add_parser("verify")
+    s = sub.add_parser("verification"); vs = s.add_subparsers(dest="sub", required=True)
+    x = vs.add_parser("scaffold"); x.add_argument("target", help="a claim card id (C001) or a manuscript file")
+    x = vs.add_parser("lint"); x.add_argument("file"); vs.add_parser("list")
     s = sub.add_parser("propose"); ps = s.add_subparsers(dest="sub", required=True)
     x = ps.add_parser("start"); x.add_argument("file")
     x = ps.add_parser("finish"); x.add_argument("token"); x.add_argument("--kind", required=True, choices=proposals.KINDS); x.add_argument("--why", required=True); x.add_argument("--rule")
@@ -571,6 +708,7 @@ def build_parser():
     s.add_argument("--port", type=int, default=0); s.add_argument("--open", action="store_true"); s.add_argument("--once", action="store_true", help=argparse.SUPPRESS)
     # human-only
     sub.add_parser("setup"); sub.add_parser("trust"); sub.add_parser("update-tools")
+    s = sub.add_parser("confirm"); s.add_argument("ids", nargs="*")
     s = sub.add_parser("apply"); s.add_argument("ids", nargs="*")
     s = sub.add_parser("verify"); s.add_argument("ids", nargs="*")
     sub.add_parser("style")
@@ -582,6 +720,7 @@ def build_parser():
 
 
 DISPATCH = {"help": cmd_help, "check": cmd_check, "status": cmd_status, "facts": cmd_facts, "propose": cmd_propose,
+            "claims": cmd_claims, "provenance": cmd_provenance, "verification": cmd_verification,
             "lint": cmd_lint, "rules": cmd_rules, "refcheck": cmd_refcheck, "search": cmd_search,
             "searchlog": cmd_searchlog, "ledger": cmd_ledger, "data": cmd_data, "overlap": cmd_overlap,
             "argmap": cmd_argmap, "annot": cmd_annot, "docx-comments": cmd_docx_comments, "export": cmd_export,

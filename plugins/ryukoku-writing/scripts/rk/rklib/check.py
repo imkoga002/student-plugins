@@ -1,11 +1,15 @@
 """`rk check` - the structural checks. The same code runs on the student's computer and in CI.
 
 Stages
-  draft   (default) structural breakage, unsigned or stale human states, undecided change detections and a broken
-          AI-use log are errors; everything still to do is a note
-  pr      + every manuscript file changed against --base-ref needs a current section sign-off
-  submit  + every manuscript file signed, the pre-submission record current, cited sources VERIFIED by a person,
-          course policy known and signed, CriticMarkup removed
+  draft   (default) structural breakage, human states without their record (or a VERIFIED without its signature),
+          undecided change detections, a broken AI-use log or provenance log are errors; citations whose source is
+          not in the ledger or below IDENTITY_CONFIRMED, figures without a source and claim-card problems are
+          warnings; everything still to do is a note
+  pr      + every manuscript file changed against --base-ref needs a current section confirmation (a key press);
+          AI-written paragraphs in a course recorded as prohibited are errors
+  submit  + the final pre-submission confirmation current (passphrase signature), cited sources VERIFIED by a
+          person (signature) and at least IDENTITY_CONFIRMED by the machine, course policy known and confirmed,
+          CriticMarkup removed, AI-written paragraphs absent when the course prohibits AI
 CI (`--ci --base-ref origin/<base>`, run with the BASE branch's copy of this code, so a PR cannot
 switch off the check that judges it): trusted signers come from
 the base branch (trust.py), the sign-off record and the AI-use log must extend the base versions, and changes to
@@ -18,7 +22,8 @@ import os
 import re
 import subprocess
 
-from . import ailog, criticmarkup, datacheck, ledger, msguard, proposals, searchlog, sign, style, subjects, trust
+from . import (ailog, claimcards, criticmarkup, datacheck, ledger, msguard, proposals, provenance, searchlog, sign, style,
+               subjects, trust, verification)
 from .common import feedback_lang, load_config, manuscript_files, read_text, rel, sha256_file, tr
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -116,7 +121,7 @@ def read_manifest_from_text(text):
 def check_human_states(proj, idx, rep):
     n_ok = 0
     pools = [subjects.sources(proj), subjects.claims(proj), [s for s in subjects.rules(proj) if s.claimed],
-             subjects.comments(proj)]
+             subjects.comments(proj), subjects.cards(proj)]
     for pool in pools:
         for s in pool:
             if not s.claimed:
@@ -132,15 +137,24 @@ def check_human_states(proj, idx, rep):
                 continue
             old = sign.latest(idx, s.kind, s.sid)
             where = {"source": "sources/register.csv", "claim": "sources/claims.csv", "rule": ".ryukoku/style.yml",
-                     "comment": "review/annotations.json"}[s.kind]
-            if old:
-                rep.err(rep.t("%s %s の「%s」は、署名の後に内容が変わった(署名が古い)。読み直して署名し直す",
-                              "%s %s: '%s' was signed for different content (stale signature). Re-read and sign again") % (where, s.sid, s.claimed))
-            else:
-                rep.err(rep.t("%s %s に「%s」とあるが、人間の署名がない(人間の確認は署名つきでしか成立しない。AI やスクリプトが書いた可能性)",
-                              "%s %s says '%s' but has no human signature (a human confirmation exists only as a signature; an AI or a script may have written it)")
+                     "comment": "review/annotations.json", "card": "claims/%s.md" % s.sid}[s.kind]
+            signed = sign.needs_signature(s.kind, s.claimed)
+            if s.kind == "card" and old:
+                rep.warn(rep.t("%s: 学生の確認の後に、主張・範囲・学生の言葉などが変わった。読み直して、もう一度確認する(証拠ノートの「主張カード」か ./rk confirm)",
+                               "%s: the claim, scope or the student's words changed after your confirmation. Re-read and confirm again (notebook 'Claim cards' or ./rk confirm)") % where)
+            elif old:
+                rep.err(rep.t("%s %s の「%s」は、記録の後に内容が変わった(記録が古い)。読み直して%sし直す",
+                              "%s %s: '%s' was recorded for different content (stale record). Re-read and %s again")
+                        % (where, s.sid, s.claimed, rep.t("署名" if signed else "確認", "sign" if signed else "confirm")))
+            elif signed:
+                rep.err(rep.t("%s %s に「%s」とあるが、人間の署名がない(VERIFIED は合言葉の署名つきでしか成立しない。AI やスクリプトが書いた可能性)",
+                              "%s %s says '%s' but has no human signature (VERIFIED exists only as a passphrase signature; an AI or a script may have written it)")
                         % (where, s.sid, s.claimed))
-    rep.note(rep.t("署名で裏づけられた人間の判断: %d 件", "human decisions backed by signatures: %d") % n_ok)
+            else:
+                rep.err(rep.t("%s %s に「%s」とあるが、学生の確認の記録がない(AI やスクリプトが書いた可能性。証拠ノートか端末で確認する)",
+                              "%s %s says '%s' but there is no record of your confirmation (an AI or a script may have written it)")
+                        % (where, s.sid, s.claimed))
+    rep.note(rep.t("記録で裏づけられた人間の判断: %d 件", "human decisions backed by records: %d") % n_ok)
 
 
 def changed_manuscripts(proj, base_ref):
@@ -153,9 +167,7 @@ def changed_manuscripts(proj, base_ref):
 def check_sections(proj, idx, rep, stage, base_ref):
     secs = {s.sid: s for s in subjects.sections(proj)}
     targets = []
-    if stage == "submit":
-        targets = list(secs)
-    elif stage == "pr":
+    if stage == "pr":
         if not base_ref:
             rep.err(rep.t("--stage pr には --base-ref が要る", "--stage pr needs --base-ref"))
             return
@@ -169,13 +181,13 @@ def check_sections(proj, idx, rep, stage, base_ref):
         if not ok:
             if r in targets:
                 old = sign.latest(idx, "section", r)
-                rep.err(rep.t("%s の現在の内容に本人の署名がない%s。差分を読んでから署名する(証拠ノートの「提出前」か ./rk signoff)",
-                              "%s: no signature by you for its current content%s. Read the diff, then sign (notebook 'Before submission' or ./rk signoff)")
-                        % (r, rep.t("(前回の署名の後に変わった)", " (changed since your last signature)") if old else ""))
+                rep.err(rep.t("%s の現在の内容を読んだ確認がない%s。差分を読んでから確認する(証拠ノートの「提出前」か ./rk signoff)",
+                              "%s: no confirmation that you read its current content%s. Read the diff, then confirm (notebook 'Before submission' or ./rk signoff)")
+                        % (r, rep.t("(前回の確認の後に変わった)", " (changed since your last confirmation)") if old else ""))
             else:
                 unsigned += 1
     if unsigned and stage == "draft":
-        rep.note(rep.t("署名前の原稿ファイル: %d 件(提出前に一件ずつ読んで署名する)", "manuscript files not signed yet: %d (read and sign each before submission)") % unsigned)
+        rep.note(rep.t("読んだ確認の記録がない原稿ファイル: %d 件(任意。提出前の確認でまとめて読む)", "manuscript files without a reading confirmation: %d (optional; the pre-submission confirmation covers them)") % unsigned)
 
 
 def check_config(proj, idx, rep, stage):
@@ -189,8 +201,8 @@ def check_config(proj, idx, rep, stage):
             "The course AI policy is not confirmed (ai_policy: unknown). Check the syllabus and ask your instructor if unsure (guideline III-3); then run ./rk setup"))
     subj = subjects.config_subject(proj)
     if not sign.current(idx, "config", subj.sid, subj.digest):
-        (rep.err if stage == "submit" else rep.warn)(rep.t("科目の AI 利用条件の記録に本人の署名がない、または署名の後に変わった(./rk setup)",
-                                                            "The course AI policy record is not signed by you, or changed after signing (./rk setup)"))
+        (rep.err if stage == "submit" else rep.warn)(rep.t("科目の AI 利用条件の記録に本人の確認がない、または確認の後に変わった(./rk setup)",
+                                                            "The course AI policy record is not confirmed by you, or changed after you confirmed it (./rk setup)"))
     if not sign.latest(idx, "optout", "optout"):
         rep.warn(rep.t("入力を学習に使わない設定(オプトアウト)の確認が記録されていない(ガイドラインⅡ-2(1))。./rk setup で記録する",
                        "No record that you checked the training opt-out (guideline II-2(1)); record it with ./rk setup"))
@@ -258,16 +270,74 @@ def check_citations(proj, idx, rep, stage):
             known |= {str(x.get("id")) for x in json.load(f) if isinstance(x, dict)}
     except (OSError, ValueError):
         pass
-    unknown = sorted(k for k in keys if k not in known)
+    unknown = sorted(k for k in keys if k not in by_key)
+    bad = (rep.err if stage == "submit" else rep.warn)
     if unknown:
-        rep.warn(rep.t("原稿の引用キーが register.csv / references.json にない: %s", "citation keys not in register.csv / references.json: %s") % ", ".join(unknown[:10]))
-    if stage == "submit":
-        srcs = {s.sid: s for s in subjects.sources(proj)}
-        for k in sorted(keys):
-            r = by_key.get(k)
-            s = srcs.get(r.get("id")) if r else None
-            if not (s and s.claimed == "VERIFIED" and sign.current(idx, "source", s.sid, s.digest, ("VERIFIED",))):
-                rep.err(rep.t("原稿が引く %s は、本人が原典を確かめた署名(source VERIFIED)がない", "%s is cited but has no signed source VERIFIED by you") % k)
+        bad(rep.t("原稿の引用キーが台帳(register.csv)にない(実在を確かめていない文献は原稿に入れない): %s",
+                  "citation keys not in the ledger (register.csv); unchecked sources do not go into the manuscript: %s") % ", ".join(unknown[:10]))
+    srcs = {s.sid: s for s in subjects.sources(proj)}
+    for k in sorted(keys):
+        r = by_key.get(k)
+        if not r:
+            continue
+        ms = (r.get("machine_status") or "CANDIDATE").strip()
+        s = srcs.get(r.get("id"))
+        human_ok = bool(s and s.claimed == "VERIFIED" and sign.current(idx, "source", s.sid, s.digest, ("VERIFIED",)))
+        if ms != "IDENTITY_CONFIRMED":
+            note = (r.get("human_note") or "").strip()
+            if human_ok and note:
+                rep.warn(rep.t("引用 %s(%s)は機械の確認が %s。原典を確かめた署名とメモ(%s)があるので注意にとどめる",
+                               "%s (%s) is %s by the machine; your signed VERIFIED with a note (%s) keeps it a warning") % (k, r.get("id"), ms, note[:60]))
+            else:
+                bad(rep.t("引用 %s(%s)の台帳の状態が %s(IDENTITY_CONFIRMED 未満)。rk.py refcheck check で識別子を確かめるか、使わない"
+                          "(識別子で確かめられない資料は、原典を読んで VERIFIED にするとき理由をメモに書く)",
+                          "%s (%s) has ledger state %s (below IDENTITY_CONFIRMED). Check its identifier with rk.py refcheck check, or do not "
+                          "cite it (for a work without an identifier, write the reason in the note when you mark it VERIFIED)") % (k, r.get("id"), ms))
+        if stage == "submit" and not human_ok:
+            rep.err(rep.t("原稿が引く %s は、本人が原典を確かめた署名(source VERIFIED)がない", "%s is cited but has no signed source VERIFIED by you") % k)
+
+
+def check_numbers(proj, rep):
+    n = 0
+    for p in manuscript_files(proj):
+        relp = rel(proj, p)
+        for ln, tok in verification.numbers_without_source(proj, read_text(p), relp):
+            n += 1
+            if n <= 8:
+                rep.warn(rep.t("%s:%d の数字「%s」に、出典の引用もデータファイルへの参照(data/...・data/numeric-claims.csv)もない",
+                               "%s:%d: the figure \"%s\" has neither a citation nor a data reference (data/..., data/numeric-claims.csv)") % (relp, ln, tok))
+    if n > 8:
+        rep.warn(rep.t("出典のない数字がほかに %d 件(rk.py lint で全部)", "%d more figures without a source (rk.py lint lists them all)") % (n - 8))
+
+
+def check_cards(proj, rep):
+    for c in claimcards.cards(proj):
+        for x in claimcards.problems(c, rep.lang):
+            rep.warn(rep.t("主張カード %s: ", "claim card %s: ") % c["id"] + x)
+
+
+def check_provenance(proj, rep, stage, ci):
+    if not ci:
+        try:
+            provenance.sync_student(proj)
+        except OSError:
+            pass
+    for p in provenance.verify(proj, local=not ci, lang=rep.lang):
+        rep.err(p)
+    s = provenance.summary(proj)
+    ai_n = s["by_origin"]["ai_wrote"][0] + s["by_origin"]["ai_edited"][0]
+    if s["paragraphs"]:
+        rep.note(rep.t("由来: 段落 %d のうち、AI が書いた %d・AI が直した %d・AI の段落を学生が直した(推定)%d・学生(推定)%d・記録なし %d",
+                       "provenance: of %d paragraphs, AI-written %d, AI-revised %d, AI paragraphs revised by you (estimated) %d, yours (estimated) %d, unrecorded %d")
+                 % (s["paragraphs"], s["by_origin"]["ai_wrote"][0], s["by_origin"]["ai_edited"][0], s["by_origin"]["student_after_ai"][0],
+                    s["by_origin"]["student"][0], s["by_origin"]["unrecorded"][0]))
+    pol = load_config(proj).get("ai_policy") or "unknown"
+    if pol == "prohibited" and ai_n:
+        (rep.err if stage in ("pr", "submit") else rep.warn)(rep.t(
+            "科目は AI 利用禁止(prohibited)と記録されているのに、AI が書いた・直した段落が原稿に %d 段落ある(.ryukoku/provenance.jsonl)。"
+            "その段落を自分で書き直すか、科目の条件の記録が誤りなら ./rk setup で直す",
+            "The course is recorded as AI-prohibited, but %d paragraph(s) in the manuscript were written or revised by the AI "
+            "(.ryukoku/provenance.jsonl). Rewrite them yourself, or correct the policy record with ./rk setup if it is wrong") % ai_n)
 
 
 # ------------------------------------------------------------------------------- Claude Code settings
@@ -320,7 +390,7 @@ def guarded_problems(proj, idx, rep, ci=False, base_ref=None):
     if not s.content.get("files"):
         return
     if sign.current(idx, "guarded", s.sid, s.digest):
-        rep.note(rep.t("検査・記録の道具か CI の設定の変更(%s)は、学生が署名で確認済み", "changes to the tools or CI settings (%s) were confirmed with a signature")
+        rep.note(rep.t("検査・記録の道具か CI の設定の変更(%s)は、学生が確認済み", "changes to the tools or CI settings (%s) were confirmed with a signature")
                  % ", ".join(s.content["files"][:6]))
         return
     rep.err(rep.t("検査・記録の道具か CI の設定が、%s と違う(%s)。AI のスクリプトが検査を弱めた可能性がある。差分を読み、"
@@ -333,7 +403,7 @@ def guarded_problems(proj, idx, rep, ci=False, base_ref=None):
 
 
 def check_ci_extras(proj, rep, base_ref):
-    for relp in (ailog.LOG_REL, sign.SIGNOFFS_REL, os.path.join("research", "search-log.jsonl"),
+    for relp in (ailog.LOG_REL, sign.SIGNOFFS_REL, provenance.PROV_REL, os.path.join("research", "search-log.jsonl"),
                  os.path.join("review", "annotations-log.jsonl")):
         base = git(proj, "show", "%s:%s" % (base_ref, relp.replace(os.sep, "/")))
         if base is None:
@@ -421,18 +491,21 @@ def run(proj, stage="draft", ci=False, base_ref=None):
         for x in datacheck.verify(os.path.join(proj, "data")):
             rep.err(rep.t("データ: ", "data: ") + x)
     check_searchlog(proj, rep)
+    check_provenance(proj, rep, stage, ci)
     check_sections(proj, idx, rep, stage, base_ref)
     check_config(proj, idx, rep, stage)
     check_citations(proj, idx, rep, stage)
+    check_numbers(proj, rep)
+    check_cards(proj, rep)
     if stage == "submit":
         ps = subjects.presubmit_subject(proj)
         if not sign.current(idx, "presubmit", ps.sid, ps.digest):
-            rep.err(rep.t("提出前の署名がない、または署名の後に原稿・台帳・記法が変わった(証拠ノートの「提出前」か ./rk signoff)",
-                          "No pre-submission signature, or the manuscript, ledgers or style rules changed since (notebook 'Before submission' or ./rk signoff)"))
+            rep.err(rep.t("提出前の最終確認の署名がない、または署名の後に原稿・台帳・記法・主張カード・由来・開示文が変わった(証拠ノートの「提出前」か ./rk signoff)",
+                          "No signed pre-submission confirmation, or the manuscript, ledgers, style rules, claim cards, provenance or disclosure statement changed since (notebook 'Before submission' or ./rk signoff)"))
         days = [d for d in subjects.ailog_days(proj) if not sign.latest(idx, "ailog", d.sid)]
-        if days:
-            rep.warn(rep.t("AI 利用の概要を本人が確認していない日: %d 日(開示の材料。証拠ノートの「提出前」か ./rk disclose)",
-                           "days without your AI-use summary: %d (disclosure facts; notebook 'Before submission' or ./rk disclose)") % len(days))
+        if days and not subjects.disclosure_statements(proj):
+            rep.warn(rep.t("AI 利用の開示文(disclosure/statement.md)がなく、概要を本人が確認していない日が %d 日ある(./rk facts の事実から開示文を作る。disclosure スキル)",
+                           "no AI-use disclosure statement (disclosure/statement.md) and %d day(s) without your summary (draft it from ./rk facts; disclosure skill)") % len(days))
         unv = [c for c in subjects.claims(proj) if c.claimed != "VERIFIED"]
         if unv:
             rep.warn(rep.t("本人が原典で確認していない主張: %s", "claims you have not verified in the source: %s") % ", ".join(c.sid for c in unv[:15]))

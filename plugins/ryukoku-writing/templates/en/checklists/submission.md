@@ -1,7 +1,7 @@
-# Pre-submission checklist (go through it with `./rk signoff`)
+# Pre-submission checklist (go through it with `./rk signoff`; the final confirmation is signed with your passphrase)
 
-- [ ] I wrote all text, questions, claims and conclusions myself (guideline III-4)
-- [ ] Accepted AI proposals were format-only; I checked the disclosure facts (`./rk facts`)
+- [ ] The questions, claims and conclusions are mine; I read every passage the AI wrote or revised and checked it says what my claim cards say
+- [ ] The AI-use disclosure (`./rk facts` and disclosure/statement.md) matches the provenance record and the course's instructions (guideline III-3, III-4)
 - [ ] I checked quotations, figures and page numbers in the sources (claims VERIFIED)
 - [ ] Quotations are marked and sourced (Copyright Act arts. 32, 48)
 - [ ] No fabrication, falsification, plagiarism, duplicate submission or improper authorship

@@ -4,9 +4,12 @@
 #  1. Personal/confidential data -> stop the prompt, name the kind and the line, mask the value, say how to resend
 #     (NFKC first so full-width digits are caught). A bare 8-digit "ID: 12345678" only adds a caution.
 #  2. Record a prompt *category* in the chained AI-use log (never the prompt text).
-#  3. Ghostwriting / question-delegation / translation / "what do you think" requests -> do not stop; inject the
-#     reason and the alternatives, and for judgement requests ask for the student's own view first. The final
-#     safeguard is structural: the AI cannot write manuscript/ or research/questions.md at all.
+#  3. Writing requests (drafting, rewriting, translating the manuscript) -> do not stop; inject what the course AI
+#     policy allows, that only confirmed claim cards, ledger sources and saved data are material, and that the
+#     writing is recorded as provenance. Question-delegation requests -> the research question and the claims stay
+#     the student's (help to shape them, never supply them). Judgement requests -> the student's own view first.
+#     The structural safeguards: the course policy gate on manuscript writes, provenance, research/questions.md and
+#     thinking/ closed to the AI.
 #  4. Course AI policy reminder.
 set -u; set -f
 HERE="$(cd "$(dirname "$0")" && pwd)"; . "$HERE/lib.sh"
@@ -87,25 +90,31 @@ if have_python; then
     | pyrun -I -B "$RK_HOOKCORE" log "$PROJ" "$(printf '%s' "$INPUT" | json_string_field transcript_path)" >/dev/null 2>&1
 fi
 
+case "$POLICY" in
+  allowed) PWRITE="$(t "科目の AI 利用条件は allowed(原稿の執筆・修正をしてよい)。" "The course AI policy is allowed (drafting and revising the manuscript is permitted).")" ;;
+  limited) PWRITE="$(t "科目の AI 利用条件は limited(許可された用途: $(cfg_get ai_allowed_uses))。原稿に書く前に確認が出るので、学生にシラバスや教員の指示で執筆が許される範囲かを確かめてもらう。" "The course AI policy is limited (allowed uses: $(cfg_get ai_allowed_uses)). Each manuscript write asks first: the student checks whether the syllabus or instructor allows AI writing.")" ;;
+  prohibited) PWRITE="$(t "科目の AI 利用条件は prohibited。原稿は書かない(フックが止める)。理由を一文で伝え、できること(検証・調査・形式の確認、考えを整理する問いかけ)を示す。" "The course AI policy is prohibited: do not write the manuscript (the hooks block it). Say why in one sentence and offer what remains (verification, research, format checks, questions that help the student think).")" ;;
+  *) PWRITE="$(t "科目の AI 利用条件が未確認(unknown)。原稿に書く前に確認が出る。まず学生に、シラバスで AI の執筆が許されているかを確かめるよう一度伝える(ガイドラインⅢ-3)。" "The course AI policy is unknown. Each manuscript write asks first; tell the student once to check whether the syllabus allows AI writing (guideline III-3).")" ;;
+esac
 MSG=""
 case ",$FLAG," in *",ghostwrite,"*)
-  MSG="$(t "$TAG この依頼は本文の代筆・書き直し・文例の作成に当たる可能性がある。本文の文章は、一部でも、例文の形でも生成しない(龍谷大学ガイドラインⅢ-4: 生成AIで作ったものを一部でも自分の成果物にすることを強く戒めている。Ⅲ-1: 学びの中心は自分で考えて書くこと。科目の設定でも外せない)。断る理由を一文で示し、説教しない。代わりにできること: (a) 問いかけで考えを言葉にする手伝い(rq-dialogue・argument-map)、(b) その箇所の論証の穴を、基準を名指しした問いで示す(review-comments。修正例は出さない)、(c) 資料探しと実在確認(research-plan・verify-sources)、(d) 表記・書式の統一だけを提案ファイルにする(format-proposals。学生が画面で採否を決める)。表記の見本が要るときは、学生の内容を含まない記号の見本(「X は Y である。」など)だけにする。" \
-"$TAG This request may be ghostwriting, rewriting or asking for sample prose. Do not produce manuscript prose, not even part of it or as an example (Ryukoku guideline III-4 strongly warns against presenting AI-made work, even in part, as one's own; III-1: thinking and writing are the core of learning; no course setting lifts this). Give the reason in one sentence, without lecturing. Offer instead: (a) questions that help the student put their idea into words (rq-dialogue, argument-map); (b) criteria-named questions about gaps in that passage (review-comments; no rewritten text); (c) finding and verifying sources (research-plan, verify-sources); (d) notation/format-only proposals the student accepts or rejects on the screen (format-proposals). If a notation example is needed, use a content-free placeholder ('X is Y.').")" ;;
+  MSG="$(t "$TAG この依頼は原稿の文の執筆・書き直し(代筆に当たりうる)。$PWRITE 書くなら draft-writer の手順で: 材料は学生が確認した主張カード・論証図・台帳の文献・保存したデータだけ。材料にない主張・数字・文献は本文に足さず、本文の外に「追加の提案」として並べる。主張カードがまだない、または draft なら、先に学生の考えを聞き(idea-intake)、学生に確認してもらう。書いた段落の由来は自動で記録され、直後に機械の照合が回る(ガイドラインⅢ-4: AI が書いた部分を隠さず開示できるようにするため)。RQ・主張の中身を新しく作らない。" \
+"$TAG This request asks for manuscript text (drafting or rewriting; it may count as ghostwriting). $PWRITE If you write, follow draft-writer: the only material is the student's confirmed claim cards, argument maps, ledger sources and saved data. Add no claim, figure or source beyond them; list wishes outside the text as 'additional suggestions'. If there is no claim card yet, or it is a draft, first hear the student's idea (idea-intake) and let them confirm it. Each written paragraph is recorded as provenance and checked mechanically right after (guideline III-4: so that what the AI wrote can be disclosed). Never invent the research question or claims.")" ;;
 esac
 case ",$FLAG," in *",delegate_question,"*)
   MSG="$MSG
-$(t "$TAG テーマ・RQ・仮説・主張・結論を AI が決めたり提案したりしない(ガイドラインⅢ-1)。『〜は〜か、という問いはどうか』の形の提案もしない。まず学生の今の考えを聞き、学生の言葉を引用して問いを 1〜2 個だけ返し(番号つきで 3 個以上並べない。学生の言葉がまだ無ければ、今の関心を尋ねる一問だけでよい)、学生が research/questions.md に自分で書くのを待つ(rq-dialogue)。資料が要るなら、学生の問いに由来する調査計画を立てる(research-plan)。" \
-"$TAG Do not decide or propose the topic, research question, hypothesis, claim or conclusion (guideline III-1), not even as 'how about the question ...?'. First ask for the student's current view, quote their words, ask one or two questions only (never a numbered list of three or more; with nothing from the student yet, one question about their interest is enough) and let them write it in research/questions.md (rq-dialogue). If sources are needed, plan research that derives from the student's question (research-plan).")" ;;
+$(t "$TAG テーマ・RQ・仮説・主張・結論の中身を AI が決めたり、学生のものとして差し出したりしない(ガイドラインⅢ-1)。『〜は〜か、という問いはどうか』の形の提案もしない。問いの立て方(問いの型、範囲の絞り方、答えになる資料の種類)を一緒に考えるのはよい。まず学生の今の考えを聞き、学生の言葉を引用して問いを 1〜2 個だけ返す(番号つきで 3 個以上並べない)。考えが出てきたら主張カードに整理してよい(idea-intake。学生の言葉の原文を残す)。問いは学生が research/questions.md に自分で書く(rq-dialogue)。" \
+"$TAG Do not decide the topic, research question, hypothesis, claim or conclusion, or hand them over as the student's (guideline III-1), not even as 'how about the question ...?'. Thinking together about how to frame a question (question types, narrowing the scope, what evidence would answer it) is fine. First ask for the student's current view, quote their words and ask one or two questions only (never a numbered list of three or more). Once ideas come, they may be organised into a claim card (idea-intake, keeping the student's own words). The student writes the question in research/questions.md (rq-dialogue).")" ;;
 esac
 case ",$FLAG," in *",judgement,"*)
   MSG="$MSG
-$(t "$TAG 判断を求める依頼。答える前に、学生自身の考えと、その理由を一言で聞く。答えるときは観点(基準)を並べ、どれを重く見るかは学生に委ねる。論文の内容(主張・結論)については判断を代わりに出さない。" \
-"$TAG A request for a judgement. Before answering, ask for the student's own view and reason. When you answer, lay out criteria and leave the weighting to the student. Do not hand down judgements on the paper's content (claims, conclusions).")" ;;
+$(t "$TAG 判断を求める依頼。答える前に、学生自身の考えと、その理由を一言で聞く。答えるときは観点(基準)を並べ、どれを重く見るかは学生に委ねる。論文の内容(主張・結論)については判断を代わりに出さない。厳密な検証が要るなら claim-verification で根拠つきに示す。" \
+"$TAG A request for a judgement. Before answering, ask for the student's own view and reason. When you answer, lay out criteria and leave the weighting to the student. Do not hand down judgements on the paper's content (claims, conclusions); for a rigorous check use claim-verification, with evidence.")" ;;
 esac
 case ",$FLAG," in *",translation,"*)
   MSG="$MSG
-$(t "$TAG 学生の和文を提出用の英文に(またはその逆に)翻訳することは、科目が許可し開示する場合を除いて行わない(ガイドラインⅢ-3・Ⅲ-4、作業憲法 第2条)。語や表現の用法の説明、学生が書いた英文の文法上の問題の指摘(箇所と理由)はできる。科目の条件は .ryukoku/config.yml の ai_policy・ai_allowed_uses。" \
-"$TAG Do not translate the student's text into submission text unless the course allows it and it is disclosed (guideline III-3, III-4; CONSTITUTION.md article 2). You may explain usage and point out grammar problems in English the student wrote (location and reason). See ai_policy / ai_allowed_uses in .ryukoku/config.yml.")" ;;
+$(t "$TAG 学生の文を提出用に翻訳することは、原稿の執筆に当たる。$PWRITE 書くなら draft-writer の手順で、材料の指定に --purpose translate を付ける(由来に翻訳として残り、開示の事実になる)。語や表現の用法の説明、学生の英文の文法上の問題の指摘(箇所と理由)は、科目の条件にかかわらずできる(ガイドラインⅢ-3・Ⅲ-4)。" \
+"$TAG Translating the student's text into submission text is manuscript writing. $PWRITE If you write it, follow draft-writer with --purpose translate in the materials (provenance records it as a translation for the disclosure). Explaining usage and pointing out grammar problems in English the student wrote is possible under any policy (guideline III-3, III-4).")" ;;
 esac
 if printf '%s' "$P" | LC_ALL=C grep -Eiq '(^|[^a-z0-9])id[[:space:]]*[:：][[:space:]]*[a-z]{0,2}[0-9]{6,10}([^0-9]|$)'; then
   MSG="$MSG
@@ -113,7 +122,7 @@ $(t "$TAG 注意: 入力に番号らしきもの(ID: 数字)がある。学籍�
 fi
 case "$POLICY" in
   prohibited) MSG="$MSG
-$(t "$TAG この科目は AI 利用禁止と記録されている(ai_policy: prohibited)。原稿・調査・検証の作業はしない。教員の指示の確認を促す(ガイドラインⅢ-3)。" "$TAG This course is recorded as AI-prohibited (ai_policy: prohibited). Do not work on the manuscript, research or verification; suggest confirming with the instructor (guideline III-3).")" ;;
+$(t "$TAG この科目は AI 利用禁止と記録されている(ai_policy: prohibited)。原稿を書かない・直さない、主張カードを作らない、表記の提案をしない。調査・検証(修正案の文は出さない)・形式の確認はできる。記録が正しいかは教員の指示で確かめるよう促す(ガイドラインⅢ-3)。" "$TAG This course is recorded as AI-prohibited (ai_policy: prohibited). Do not write or revise the manuscript, draft claim cards or make notation proposals; research, verification (without rewritten text) and format checks remain. Suggest confirming the record with the instructor (guideline III-3).")" ;;
   limited) MSG="$MSG
 $(t "$TAG この科目の AI 利用は限定(ai_allowed_uses: $(cfg_get ai_allowed_uses))。範囲外の用途はフックが確認を求める。" "$TAG AI use in this course is limited (ai_allowed_uses: $(cfg_get ai_allowed_uses)). The hooks ask before other uses.")" ;;
 esac

@@ -1,4 +1,5 @@
-"""Human states exist only as passphrase signatures by a trusted signer, locally and in CI.
+"""VERIFIED and the final pre-submission confirmation exist only as passphrase signatures by a trusted signer,
+locally and in CI; the other human states are light confirmations that an AI cannot add during its tool calls.
 Forgeries are made the way an AI tool call would make them (a script file, then `python3 scratch/f.py`), never by
 editing the plugin. CI is reproduced as the workflow runs it: the base branch's tools from a separate worktree."""
 import json
@@ -95,14 +96,14 @@ class Forgery(unittest.TestCase):
         self.assertEqual(rc, 0, out[-1500:])
         r = self.E.rk("check")
         self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertIn("署名で裏づけられた人間の判断: 2 件", r.stdout)
+        self.assertIn("記録で裏づけられた人間の判断: 2 件", r.stdout)
         p = self.E.path("sources", "claims.csv")
         s = open(p, encoding="utf-8").read().replace("p. 3", "p. 4")
         with open(p, "w", encoding="utf-8") as f:
             f.write(s)
         r = self.E.rk("check")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("署名の後に内容が変わった", r.stdout)
+        self.assertIn("記録の後に内容が変わった", r.stdout)
 
     def test_no_secret_on_disk(self):
         rc, out = self.E.tty(["verify"], ["v", "", "v", "", PASS])
@@ -133,13 +134,16 @@ class Forgery(unittest.TestCase):
     def test_new_passphrase_and_revocation(self):
         new = "a new passphrase 2026"
         # leaked: hand over with the current passphrase, then revoke
-        rc, out = self.E.tty(["setup"], ["n", "y", "", PASS, new, new, "y", "n"])
+        rc, out = self.E.tty(["verify"], ["v", "", "s", PASS])  # a VERIFIED signed with the current passphrase
+        self.assertEqual(rc, 0, out[-1500:])
+        # leaked: hand over with the current passphrase, then revoke (course record kept, opt-out already recorded)
+        rc, out = self.E.tty(["setup"], ["y", "n", "y", "", PASS, new, new, "n"])
         self.assertEqual(rc, 0, out[-2000:])
         self.assertIn("失効", out)
         self.assertEqual(self.E.rk("check").returncode, 0)  # signatures made before the revocation stay valid
-        rc, out = self.E.tty(["sign", "optout", "optout", "--decision", "checked"], ["y", PASS, PASS, PASS])
+        rc, out = self.E.tty(["sign", "claim", "C001", "--decision", "VERIFIED"], ["y", PASS, PASS, PASS])
         self.assertNotEqual(rc, 0)  # the old passphrase no longer signs
-        rc, out = self.E.tty(["sign", "optout", "optout", "--decision", "checked"], ["y", new])
+        rc, out = self.E.tty(["sign", "claim", "C001", "--decision", "VERIFIED"], ["y", new])
         self.assertEqual(rc, 0, out[-1500:])
 
     def test_project_copy_refuses_human_commands(self):
@@ -284,11 +288,22 @@ class CI(unittest.TestCase):
         # the PR's own (neutered) copy would have passed the human-state check: the base copy did not
         self.assertIn("人間の署名がない", out)
 
-    def test_detection_reaches_ci(self):
+    def test_provenance_reaches_ci(self):
+        # in a course recorded as prohibited, an AI write that slipped past the guard reaches CI as provenance
+        self.E.setup(policy="p", git="g")
+        git(self.E.proj, "checkout", "-q", "-b", "sec1")
+        self.E.post("Bash", {"command": "true"}, tuid="i")
+        self.E.ai_bash('D=manu; D="${D}script"; printf "\\nx\\n" >> "$D/main.md"', tuid="m1", allow_ask=True)
+        self.branch_commit("bypass")
+        rc, out = self.ci()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("AI が書いた・直した段落が原稿に", out)
+
+    def test_detection_of_a_protected_file_reaches_ci(self):
         self.E.setup(git="g")
         git(self.E.proj, "checkout", "-q", "-b", "sec1")
         self.E.post("Bash", {"command": "true"}, tuid="i")
-        self.E.ai_bash('D=manu; D="${D}script"; printf x >> "$D/main.md"', tuid="m1", allow_ask=True)
+        self.E.ai_bash("Q=ques; printf '| Q9 | x | y | z |\\n' >> \"research/${Q}tions.md\"", tuid="m1", allow_ask=True)
         self.branch_commit("bypass")
         rc, out = self.ci()
         self.assertEqual(rc, 1, out)
@@ -299,8 +314,9 @@ class CI(unittest.TestCase):
         git(self.E.proj, "checkout", "-q", "-b", "sec1")
         with open(self.E.path("manuscript", "main.md"), "a", encoding="utf-8") as f:
             f.write("\n自分で書いた段落(要因 A について)。\n")
-        rc, out = self.E.tty(["sign", "section", "manuscript/main.md", "--decision", "reviewed"], ["y", PASS])
+        rc, out = self.E.tty(["sign", "section", "manuscript/main.md", "--decision", "reviewed"], ["y"])  # a key press
         self.assertEqual(rc, 0, out[-1500:])
+        self.assertNotIn("合言葉(入力は表示されない)", out)
         self.branch_commit("section 1")
         rc, out = self.ci()
         self.assertEqual(rc, 0, out)

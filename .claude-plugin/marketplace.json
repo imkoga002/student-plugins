@@ -8,13 +8,14 @@
     {
       "name": "ryukoku-writing",
       "source": "./plugins/ryukoku-writing",
-      "description": "龍谷大学の学生向けのレポート・卒論の執筆支援(非公式)。問い・主張・本文は学生が書き、AI は問いかけ・調査と実在確認・表記の統一の提案・レビューの問いだけを担う。AI は原稿に書けず、VERIFIED や採否などの人間の判断は学生の合言葉による署名でだけ記録され、検査と CI が照合する。日英対応。",
+      "description": "龍谷大学の学生向けのレポート・卒論の執筆支援(非公式)。主張は学生のもの。AI は考えを主張カードに整理し、主張と原稿を厳密に検証し、科目が許すときは確認済みの材料だけで執筆を手伝う。AI が書いた段落は由来として記録され、開示の事実になる。文献は実在を確かめたものだけ。合言葉の署名は VERIFIED と提出前の最終確認だけ。日英対応。",
       "category": "productivity",
       "tags": [
         "academic-writing",
         "thesis",
         "research-integrity",
-        "human-review",
+        "provenance",
+        "claim-verification",
         "japanese",
         "english",
         "unofficial"

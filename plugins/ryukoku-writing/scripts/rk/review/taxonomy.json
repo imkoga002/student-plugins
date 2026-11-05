@@ -1,7 +1,7 @@
 {
   "version": "1",
   "source": "Seven layers (claim, definition, grounds, warrant, induction and causation, dialectic, organisation) after the Toulmin layout and the informal-logic criteria of acceptability, relevance and sufficiency (Stanford Encyclopedia of Philosophy, Informal Logic, https://plato.stanford.edu/entries/logic-informal/). Fallacy names are prompts for a question, not verdicts (Internet Encyclopedia of Philosophy, Fallacies, https://iep.utm.edu/fallacy/). I4 follows Geddes 1990, Political Analysis 2:131-150, DOI 10.1093/pan/2.1.131; the 必須/推奨 split follows COPE, Ethical Guidelines for Peer Reviewers (2013), DOI 10.24318/cope.2019.1.9. Codes, labels and questions are the plugin author's paraphrases; the taxonomy has not been piloted and inter-rater agreement is not tested. Layer T holds comments imported from Word.",
-  "format": "箇所 / コード / 観点 / 問い / 重要度(必須・推奨) / 確度(確定・要確認)。書き換えの欄は持たない。",
+  "format": "箇所 / コード / 観点 / 問い / 重要度(必須・推奨) / 確度(確定・要確認)。コメントに書き換えの欄は持たない(修正案は review/verification/ の 6 節に分けて書き、学生の主張を変えない)。",
   "layers": {
     "A": "主張",
     "B": "定義",

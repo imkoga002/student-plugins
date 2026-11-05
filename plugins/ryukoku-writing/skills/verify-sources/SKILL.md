@@ -1,6 +1,6 @@
 ---
 name: verify-sources
-description: "文献の実在確認(識別子 → 解決 → メタデータ照合 → 撤回の確認)と、主張の台帳の扱い。「この文献は本物？」「DOI を確認」「出典の検証」「VERIFIED にして」「verify my sources」「check this citation」などで使う。VERIFIED は学生が原典を読み、合言葉で署名して付ける。"
+description: "文献の実在確認(識別子 → 解決 → メタデータ照合 → 撤回の確認)と、主張の台帳の扱い。原稿に引く文献は IDENTITY_CONFIRMED 以上。「この文献は本物？」「DOI を確認」「出典の検証」「VERIFIED にして」「verify my sources」「check this citation」などで使う。VERIFIED は学生が原典を読み、合言葉で署名して付ける。"
 ---
 
 # 出典の検証
@@ -12,7 +12,8 @@ description: "文献の実在確認(識別子 → 解決 → メタデータ照�
 
 ## 状態
 - 機械(AI の道具が付ける): IDENTITY_CONFIRMED(識別子が解決し、題名・著者・年が一致)/ NOT_FOUND / METADATA_MISMATCH / RETRACTED / CANDIDATE(照合する項目が足りない・未確認)。通信の失敗は状態を付けない
-- 人間(署名だけが付ける): 文献 VERIFIED / REJECTED、主張 VERIFIED / CONTRADICTED / NOT_FOUND
+- 人間(学生だけが付ける): 文献 VERIFIED / REJECTED、主張 VERIFIED / CONTRADICTED / NOT_FOUND。VERIFIED は原典を読んだという宣言なので合言葉の署名、それ以外は画面か端末の確認
+- 原稿に引用する文献は、台帳で IDENTITY_CONFIRMED 以上であること。台帳にない・それ未満のものを引くと、提出の段階の検査が通らない(下書きの段階では注意)。識別子で確かめられない資料(古い本など)は、原典を読んで VERIFIED にするときに理由をメモに書く
 - 題名なし、題名の一語だけ、ISBN のチェックディジットだけ、では IDENTITY_CONFIRMED にならない
 
 ## 手順
@@ -23,7 +24,7 @@ description: "文献の実在確認(識別子 → 解決 → メタデータ照�
    - CiNii・NDL・DataCite には撤回の情報がない。「撤回されていない」とは言わず「未確認」と伝える
    - ISBN-10 の検査は実装していない(算法を一次資料で確かめていない)
 3. 主張を台帳に入れる: `python3 tools/rk/rk.py ledger add-claim --claim "<学生が書いた主張の文>" --source-id S001`。`--locator`(頁・節)は AI が入れない。頁は学生が原典を開いて確かめ、自分の端末の `./rk verify` で入れる(AI が頁を書くと、頁の捏造や読み違いがそのまま台帳に入るため)
-4. 学生に案内する: 「原典の該当箇所を読んだら、証拠ノートの『文献と主張』で項目を表示して判断を選び、合言葉で署名する(端末なら `./rk verify`)」
+4. 学生に案内する: 「原典の該当箇所を読んだら、証拠ノートの『文献と主張』で項目を表示して判断を選ぶ。VERIFIED は合言葉で署名する(端末なら `./rk verify`)」
 5. 原典が主張と矛盾したら、主張を原典に合わせて直すことを提案する(逆は禁止)。直すのは学生。
 
 ## 推薦するとき

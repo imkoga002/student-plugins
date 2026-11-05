@@ -1,4 +1,8 @@
-"""Signing a batch of human decisions and applying them (shared by the terminal commands and the notebook screen).
+"""Recording a batch of human decisions and applying them (shared by the terminal commands and the notebook screen).
+
+Only VERIFIED and the final pre-submission confirmation are signed with the passphrase (sign.NEEDS_SIGNATURE);
+every other decision becomes a light confirmation. A batch with no item that needs a signature asks for no
+passphrase; a batch that has one derives the key once and signs only those items.
 
 sign_batch(proj, items, passphrase, method)
   items: [{"kind", "id", "decision", "note"?, "digest"?, "where_how"?}] - one entry per item the person looked at.
@@ -19,10 +23,10 @@ skipped / failed / not processed), so the screen can drop what was signed and sa
 """
 import os
 
-from . import ledger, msguard, proposals, sign, style, subjects, trust
-from .common import RkError, append_jsonl, now_iso, read_text, sha256_bytes, sha256_file, state_dir, today
+from . import ledger, msguard, proposals, provenance, sign, style, subjects, trust
+from .common import RkError, append_jsonl, load_config, now_iso, read_text, sha256_bytes, sha256_file, state_dir, today
 
-ORDER = ("source", "claim", "rule", "comment", "hunk", "change", "config", "optout", "ailog", "guarded", "import", "section",
+ORDER = ("source", "card", "claim", "rule", "comment", "hunk", "change", "config", "optout", "ailog", "guarded", "import", "section",
          "presubmit")
 
 
@@ -131,7 +135,7 @@ def _apply(proj, it, subj, rec, signer):
         keep = [r for r in prop if r.get("id") != subj.sid]
         rule = next((r for r in prop if r.get("id") == subj.sid), None)
         with open(style.proposed_path(proj), "w", encoding="utf-8") as f:
-            f.write("# 記法規則の提案(AI が抽出・提案。学生が署名して承認するまで適用しない)\nversion: 1\nrules:\n")
+            f.write("# 記法規則の提案(AI が抽出・提案。学生が承認するまで適用しない)\nversion: 1\nrules:\n")
             for r in keep:
                 f.write(style.render_rule(r))
         if dec == "approved" and rule is not None:
@@ -144,6 +148,18 @@ def _apply(proj, it, subj, rec, signer):
                     f.write("# 承認済みの記法規則。学生が署名した承認だけがここに入る(AI は .ryukoku/ に書けない)。\nversion: 1\nrules:\n")
             with open(ap, "a", encoding="utf-8") as f:
                 f.write(style.render_rule(rule))
+    elif kind == "card":
+        # the file shows the state for readers; what counts is the record (rk check compares the two)
+        import re as _re
+        p = os.path.join(proj, "claims", subj.sid + ".md")
+        try:
+            text = read_text(p)
+            new = _re.sub(r"(?m)^status:\s*\S+\s*$", "status: confirmed", text, count=1)
+            if new != text:
+                with open(p, "w", encoding="utf-8", newline="") as f:
+                    f.write(new)
+        except OSError:
+            pass
     elif kind == "comment":
         from review.store import Store
         Store(proj).set_resolved(subj.sid, signer.get("role", "student"), rec["id"])
@@ -206,10 +222,16 @@ def sign_batch(proj, items, passphrase, method="tty", results=None):
         res.append({"kind": it.get("kind"), "id": str(it.get("id") or ""), "status": "skipped", "reason": why})
     if not checked:
         return []
-    trusted, probs, _notes = trust.local_trusted(proj)
-    if not trusted:
-        raise DecisionError("信頼された署名者がいない。自分の端末で ./rk setup(別の PC なら ./rk trust)を先に行う。" + (" " + probs[0] if probs else ""))
-    signer, secret = sign.unlock(trusted, passphrase)
+    need = any(sign.needs_signature(subj.kind, it["decision"]) for it, subj in checked)
+    signer, secret = {"name": who(proj), "role": "student", "key": ""}, None
+    if need:
+        if not passphrase:
+            raise sign.SignError("VERIFIED と提出前の確認には合言葉の署名が要る / VERIFIED and the pre-submission confirmation need the passphrase")
+        trusted, probs, _notes = trust.local_trusted(proj)
+        if not trusted:
+            raise DecisionError("信頼された署名者がいない。自分の端末で ./rk verify か ./rk signoff を実行すると、最初に合言葉を登録できる"
+                                "(別の PC なら ./rk trust)。" + (" " + probs[0] if probs else ""))
+        signer, secret = sign.unlock(trusted, passphrase)
     out = []
     done = set()
     try:
@@ -236,10 +258,21 @@ def sign_batch(proj, items, passphrase, method="tty", results=None):
                 detail = {"checklist": list(subjects.CHECKLIST_IDS)}
             elif subj.kind == "section":
                 detail = {"sha256": subj.content.get("sha256")}
-            rec = sign.make_record(signer, secret, subj.kind, subj.sid, it["decision"], subj.digest, detail, method, note)
+            if sign.needs_signature(subj.kind, it["decision"]):
+                rec = sign.make_record(signer, secret, subj.kind, subj.sid, it["decision"], subj.digest, detail, method, note)
+            else:
+                rec = sign.make_confirmation(subj.kind, subj.sid, it["decision"], subj.digest, detail, method, note,
+                                             name=signer.get("name") or who(proj))
             if pending_write and pending_write[0]:
+                before_text = read_text(pending_write[0]) if os.path.exists(pending_write[0]) else ""
                 with open(pending_write[0], "w", encoding="utf-8", newline="") as f:
                     f.write(pending_write[1])
+                relp = os.path.relpath(pending_write[0], proj).replace(os.sep, "/")
+                if relp.startswith("manuscript/"):
+                    # the AI's proposal, accepted by the student: provenance says so (purpose format)
+                    provenance.sync_student(proj, relp, before_text)
+                    provenance.record(proj, relp, before_text, pending_write[1], "ai" if subj.kind == "hunk" else "student",
+                                      "proposal" if subj.kind == "hunk" else "revert", materials={"purpose": "format"})
             sign.append_signoffs(proj, [rec])
             _apply(proj, it, subj, rec, signer)
             if subj.kind == "hunk":
@@ -267,6 +300,11 @@ def sign_batch(proj, items, passphrase, method="tty", results=None):
         secret = None  # noqa: F841  (dropped: no session keeps the key)
     remember_signed_sections(proj, out)
     return out
+
+
+def who(proj):
+    """The name recorded with a light confirmation: the student's chosen name (./rk setup), else 'student'."""
+    return (load_config(proj).get("student_name") or "student")[:60]
 
 
 def section_diff_base(proj, relpath, idx):

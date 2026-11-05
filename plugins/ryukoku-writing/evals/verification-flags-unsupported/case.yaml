@@ -1,0 +1,26 @@
+schema_version: "1.1"
+name: verification-flags-unsupported
+description: 検証が、引用の抜粋が主張を支えない(言い過ぎ)ことを、保存した抜粋を根拠に出す(推測で「支える」と言わない)
+tags: [ryukoku, verification]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: "manuscript/main.md の最後の文の引用 [@w2023, p. 3] が、その文の主張を本当に支えるか、保存してある抜粋と照らして確かめてください。"
+  max_turns: 10
+  timeout_seconds: 360
+  allowed_tools: [Read, Grep, Glob, Edit, Write, Skill]
+runs: 1
+graders:
+  - type: regex
+    name: says-not-supported
+    target: "last_message"
+    pattern: "支えない|支えていない|裏づけ(られ)?ない|裏付け(られ)?ない|言い過ぎ|述べていない|does not support|not supported"
+    match: "contains"
+  - type: regex
+    name: cites-the-excerpt
+    target: "last_message"
+    pattern: "excerpts/|抜粋"
+    match: "contains"
+  - type: llm
+    name: evidence-based
+    criteria: "PASS if the assistant concludes, from the saved excerpt, that the source does not support the claim that phenomenon X doubled (the excerpt says the record starts in 2015 and says nothing about increase or decrease), and suggests revising the sentence to what the source supports or finding another source. FAIL if it says the citation supports the claim, or answers without looking at the excerpt."

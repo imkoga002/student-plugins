@@ -145,8 +145,8 @@ rel_norm() {
   printf '%s' "$f"
 }
 
-# path_class REL -> one of: manuscript ryukoku tools questions searchlog thinking disclosure annotations ledger claude runconfig startup
-#                   raw statehome settings ci proposals research other
+# path_class REL -> one of: manuscript ryukoku tools questions searchlog thinking statement disclosure annotations ledger claude
+#                   runconfig startup raw statehome settings ci proposals claims verification research other
 # REL must already be normalised. A "manuscript" segment anywhere counts (also absolute paths that point at
 # another checkout of the same project, and Windows paths passed with a foreign cwd).
 path_class() {
@@ -164,12 +164,15 @@ path_class() {
     */research/questions.md) echo questions; return ;;
     */research/search-log.jsonl) echo searchlog; return ;;
     */thinking/*|*/thinking) echo thinking; return ;;
+    */disclosure/statement*.md) echo statement; return ;;
     */disclosure/*|*/disclosure) echo disclosure; return ;;
     */review/annotations.json|*/review/annotations-log.jsonl) echo annotations; return ;;
     */sources/register.csv|*/sources/claims.csv) echo ledger; return ;;
     */data/raw/*) echo raw; return ;;
     */.github/*|*/.githooks/*|*/.git/hooks/*) echo ci; return ;;
     */proposals/*) echo proposals; return ;;
+    */claims/*) echo claims; return ;;
+    */review/verification/*) echo verification; return ;;
     */research/*|*/sources/*|*/review/*|*/excerpts/*) echo research; return ;;
   esac
   echo other

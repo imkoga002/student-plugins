@@ -1,5 +1,13 @@
-"""msguard - structural detection of changes made while an AI tool call was running (per-window snapshots, watched
-places, before-copies of protected files, AI-written files).
+"""msguard - what changed while an AI tool call was running (per-window snapshots, watched places, before-copies of
+protected files, AI-written files).
+
+Two outcomes, by place:
+  manuscript/**   a change is the AI's writing: it is recorded as provenance, paragraph by paragraph
+                  (.ryukoku/provenance.jsonl, provenance.py), not raised as an alarm. Whether the AI may write at all
+                  is decided before the call by the course AI policy (pre-guard.sh); the record is what makes the
+                  disclosure factual and lets the verification compare AI text with the student's claim cards.
+  everything else that is watched (below): a change is a detection, as in v1, because these are the records and
+                  tools that keep the provenance, the signatures and the checks honest.
 
 The PreToolUse hook calls `pre` before every tool call that may run (every tool; the hooks' matcher is "*") and
 the PostToolUse hook calls `post` after it. Anything that changed in between happened inside the AI's tool
@@ -7,14 +15,16 @@ window, whatever the command looked like (obfuscated Bash, a script file, a subp
 pattern-matching guard.
 
 Watched
-  manuscript/**                       content (shadow copies keep the state at the start of the window)
+  manuscript/**                       content (shadow copies keep the state at the start of the window) -> provenance
   tools/**, thinking/**, disclosure/**, .github/**, .githooks/**, rk, rk.cmd, rk.ps1
   .ryukoku/config.yml, signers.json, style.yml, research/questions.md
   .claude/settings.json, .claude/settings.local.json (project) and ~/.claude/settings.json, settings.local.json
   ~/.ryukoku-writing/plugin-root (where ./rk finds the plugin) and the per-user trust copy of the signers
   sources/references.json             the author and year of works already listed (new works may be added)
-  append-only: .ryukoku/signoffs.jsonl (only records that verify under a trusted signer), .ryukoku/ai-use-log.jsonl,
-               research/search-log.jsonl, review/annotations-log.jsonl
+  append-only: .ryukoku/signoffs.jsonl (only signed records that verify under a trusted signer; a light
+               confirmation has no signature, so one that appears during an AI tool call is reported),
+               .ryukoku/ai-use-log.jsonl, .ryukoku/provenance.jsonl, research/search-log.jsonl,
+               review/annotations-log.jsonl
 Each window keeps its own snapshot (state/<project>/windows/<tool_use_id>.json) and compares against it, so code
 that rewrites the shared baseline during the call does not hide its change. A window opened for a call that
 asks the student first is "pending": it is dropped at the next tool call when no PostToolUse came (the student
@@ -40,7 +50,7 @@ import shlex
 import shutil
 import time
 
-from . import ailog, execgate, sign, style, subjects, trust
+from . import ailog, execgate, provenance, sign, style, subjects, trust
 from .common import (load_config, manuscript_files, register_project, rel, sha256_bytes, sha256_file, state_dir,
                      state_home, trust_path)
 
@@ -49,7 +59,7 @@ WINDOW_STALE = 12 * 60
 TREES = ("tools", "thinking", "disclosure", ".github", ".githooks", "pandoc")
 FILES = (".ryukoku/config.yml", ".ryukoku/signers.json", ".ryukoku/style.yml", "research/questions.md",
          "rk", "rk.cmd", "rk.ps1", ".claude/settings.json", ".claude/settings.local.json")
-APPEND_ONLY = ("research/search-log.jsonl", "review/annotations-log.jsonl")
+APPEND_ONLY = ("research/search-log.jsonl", "review/annotations-log.jsonl", ".ryukoku/provenance.jsonl")
 SKIP_SCAN = {".git", "node_modules", "__pycache__", ".venv", "venv", ".rk-base"}
 
 
@@ -89,9 +99,10 @@ def watched(proj):
             for dp, dns, fns in os.walk(base):
                 dns[:] = sorted(d for d in dns if d != "__pycache__")
                 for fn in sorted(fns):
-                    if not fn.endswith(".pyc"):
-                        full = os.path.join(dp, fn)
-                        out[rel(proj, full)] = _sha_or_empty(full)
+                    if fn.endswith(".pyc") or (t == "disclosure" and fn.startswith("statement") and fn.endswith(".md")):
+                        continue  # the disclosure statement draft is the AI's to draft (the student confirms it)
+                    full = os.path.join(dp, fn)
+                    out[rel(proj, full)] = _sha_or_empty(full)
     for f in FILES:
         out[f] = _sha_or_empty(os.path.join(proj, f))
     for k, p in external_files(proj).items():
@@ -177,7 +188,31 @@ def snapshot(proj, st, old=None):
 def _baseline(proj, st, old=None):
     base = snapshot(proj, st, old)
     _save(os.path.join(st, "baseline.json"), base)
+    try:
+        provenance.ensure_known(proj)  # first sight of a manuscript file: the text to compare the next edits with
+    except OSError:
+        pass
     return base
+
+
+def _wdir(st, tuid):
+    return _wpath(st, tuid)[:-5] + ".files"
+
+
+def _copy_window_files(proj, st, tuid):
+    """The manuscript as it was when this window opened (provenance diffs against it, even if code inside the call
+    rebuilds the shared baseline and its shadow copies)."""
+    d = _wdir(st, tuid)
+    shutil.rmtree(d, ignore_errors=True)
+    for p in manuscript_files(proj):
+        try:
+            if os.path.getsize(p) > MAX_FILE:
+                continue
+            dst = os.path.join(d, rel(proj, p))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(p, dst)
+        except OSError:
+            pass
 
 
 def _windows(st):
@@ -207,12 +242,18 @@ def pre(proj, tool_use_id="", mode="run"):
     w = _windows(st)
     for k in [k for k, v in w.items() if v.get("ask")]:
         w.pop(k)  # a call that asked and got no PostToolUse was declined
+        shutil.rmtree(_wdir(st, k), ignore_errors=True)
         try:
             os.remove(_wpath(st, k))
         except OSError:
             pass
     old = _load(os.path.join(st, "baseline.json"), None)
     if not w or old is None or "append" not in old:
+        if not w:
+            try:
+                provenance.sync_student(proj)  # what changed since the last call is the student's (estimated)
+            except OSError:
+                pass
         base = _baseline(proj, st, old)
     else:
         base = old
@@ -220,6 +261,7 @@ def pre(proj, tool_use_id="", mode="run"):
     w[tuid] = {"t": time.time(), "ask": mode == "ask"}
     _save(os.path.join(st, "open.json"), w)
     _save(_wpath(st, tuid), dict(base, stat=stat_map(proj)))
+    _copy_window_files(proj, st, tuid)
     wd = _witness_dir()
     if wd:
         try:
@@ -250,6 +292,8 @@ def _new_records(proj, ref):
             bad.append(line)
             continue
         ok, _why = sign.verify_record(r, trusted)
+        if ok and sign.is_light(r):
+            ok = False  # an unsigned confirmation is made by the student's screen or terminal, never inside an AI call
         (good if ok else bad).append(r)
     return good, bad
 
@@ -341,7 +385,7 @@ def post(proj, tool="", summary="", tool_use_id="", command="", file_path=""):
     if good is None:
         other.append(".ryukoku/signoffs.jsonl(追記でない変更)")
     elif bad:
-        other.append(".ryukoku/signoffs.jsonl(信頼された署名者で検証できない記録 %d 件の追加)" % len(bad))
+        other.append(".ryukoku/signoffs.jsonl(AI のツール実行中に、署名のない確認か検証できない記録 %d 件の追加)" % len(bad))
     for r in (ailog.LOG_REL,) + APPEND_ONLY:
         key = r.replace(os.sep, "/")
         n0, h0 = (ref.get("append") or {}).get(key, [0, ""])
@@ -355,21 +399,26 @@ def post(proj, tool="", summary="", tool_use_id="", command="", file_path=""):
     stamp = time.strftime("%Y%m%dT%H%M%S")
     shadow = os.path.join(st, "shadow")
     n = 0
+    out["provenance"] = []
+    wfiles = _wdir(st, tuid)
     for r in changed:
-        n += 1
-        uid = "U-%s-%02d-%s" % (stamp, n, sha256_bytes(os.urandom(8))[:6])
-        before_copy = None
-        src = os.path.join(shadow, r)
-        if os.path.exists(src) and old.get(r):
-            before_copy = os.path.join("before", uid, r)
-            dst = os.path.join(st, before_copy)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-        ailog.append(proj, {"type": "detection", "id": uid, "what": "manuscript", "path": r,
-                            "before_sha256": old.get(r) or None, "after_sha256": cur.get(r) or None,
-                            "tool": tool, "summary": (summary or "")[:200], "before_copy": bool(before_copy),
-                            "at": time.time()})
-        out["entries"].append(uid)
+        src = os.path.join(wfiles, r)
+        if not os.path.exists(src):
+            src = os.path.join(shadow, r)
+        before = _read(src) if (os.path.exists(src) and old.get(r)) else ""
+        after = _read(os.path.join(proj, r)) if cur.get(r) else ""
+        if before is None or after is None:
+            continue
+        if provenance.known_text(proj, r) == after:
+            continue  # already recorded (an accepted proposal records itself)
+        try:
+            ents = provenance.record_ai(proj, r, before, after, tool)
+        except OSError:
+            continue
+        out["provenance"].append({"file": r, "wrote": sum(1 for e in ents if e["actor"] == "ai" and e["kind"] == "ai_wrote" and e["block"] == "paragraph"),
+                                  "edited": sum(1 for e in ents if e["actor"] == "ai" and e["kind"] == "ai_edited" and e["block"] == "paragraph"),
+                                  "deleted": sum(1 for e in ents if e["actor"] == "ai" and e["kind"] == "ai_deleted" and e["block"] == "paragraph"),
+                                  "student_estimated": sum(1 for e in ents if e["actor"] == "student")})
     if other:
         n += 1
         uid = "U-%s-%02d-%s" % (stamp, n, sha256_bytes(os.urandom(8))[:6])
@@ -388,8 +437,17 @@ def post(proj, tool="", summary="", tool_use_id="", command="", file_path=""):
                             "tool": tool, "summary": (summary or "")[:200], "at": time.time()})
         out["entries"].append(uid)
     out["manuscript_changed"], out["other_changed"] = changed, other
+    shutil.rmtree(wfiles, ignore_errors=True)
     _baseline(proj, st, base or ref)
     return out
+
+
+def _read(p):
+    try:
+        with open(p, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 def stat_map(proj):

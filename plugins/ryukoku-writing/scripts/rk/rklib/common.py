@@ -27,6 +27,10 @@ def find_project(start=None):
 
 def _unquote(v):
     v = v.strip()
+    if v[:1] in ("\"", "'"):
+        end = v.find(v[0], 1)
+        if end > 0 and not v[end + 1:].strip() or (end > 0 and re.match(r"^\s+#", v[end + 1:])):
+            return v[1:end]  # a quoted value, optionally followed by a comment
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
         return v[1:-1]
     return re.sub(r"\s+#.*$", "", v).strip()

@@ -1,8 +1,12 @@
 """What each human confirmation is bound to (kind, subject id, content digest), with a display payload for the
 evidence notebook (the screen shows exactly what the digest covers before the student can choose).
 
+Only VERIFIED (source, claim) and presubmit need the passphrase signature (sign.NEEDS_SIGNATURE); every other
+decision is a light confirmation (a button or a key; recorded, bound to the digest, not signed).
+
   kind       subject           decisions                       digest covers
   source     register id       VERIFIED / REJECTED             identifiers + title/authors/year
+  card       C001              confirmed                       the student-owned parts of the claim card
   claim      claim_id          VERIFIED / CONTRADICTED /       claim text, locator, source id and its identity
                                NOT_FOUND
   rule       rule id           approved / rejected             every rule field except status/approved_record
@@ -14,7 +18,9 @@ evidence notebook (the screen shows exactly what the digest covers before the st
   optout     optout            checked                         the statement itself (date in the record)
   ailog      YYYY-MM-DD        confirmed                       that day's AI-use log lines (summary in note)
   change     detection id      kept_ai / mine / reverted       the detection entry in the AI-use log
-  presubmit  submission        ready                           every manuscript/ledger/style hash + checklist
+  presubmit  submission        ready                           every manuscript/ledger/style/claim-card hash, the
+                                                               provenance attribution, the disclosure statement
+                                                               and the checklist
   import     docx file name    imported                        the .docx file's SHA-256
   guarded    tools             confirmed                       every file of tools/, the launchers, .github/ and
                                                                .githooks/ that differs from the plugin's copy
@@ -25,11 +31,12 @@ for that subject matches the current digest; editing the subject afterwards make
 import json
 import os
 
-from . import ailog, ledger, proposals, style
+from . import ailog, claimcards, ledger, proposals, provenance, style
 from .common import load_config, manuscript_files, project_id, rel, sha256_file, subject_hash
 
 KIND_DECISIONS = {
     "source": ("VERIFIED", "REJECTED"),
+    "card": ("confirmed",),
     "claim": ("VERIFIED", "CONTRADICTED", "NOT_FOUND"),
     "rule": ("approved", "rejected"),
     "comment": ("resolved",),
@@ -44,7 +51,7 @@ KIND_DECISIONS = {
     "guarded": ("confirmed",),
 }
 POLICY_KEYS = ("course_name", "ai_policy", "ai_allowed_uses", "ai_policy_source", "disclosure_format")
-CHECKLIST_IDS = ("own_text", "proposals_format_only", "facts_verified", "quotes_marked", "integrity",
+CHECKLIST_IDS = ("claims_mine", "disclosure_true", "facts_verified", "quotes_marked", "integrity",
                  "course_policy", "no_personal_data", "faculty_rules")
 
 
@@ -93,6 +100,17 @@ def claims(proj):
         hs = (r.get("human_status") or "").strip()
         out.append(Subject("claim", obj["claim_id"], _d(obj), "%s「%s」← %s %s" % (obj["claim_id"], obj["claim"][:50],
                            obj["source_id"], obj["locator"]), c, "" if hs == "CANDIDATE" else hs))
+    return out
+
+
+def cards(proj):
+    out = []
+    for c in claimcards.cards(proj):
+        st = c["status"] if c["status"] == "confirmed" else ""
+        content = {"id": c["id"], "sections": c["sections"], "items": c["items"], "student_part": claimcards.student_part(c),
+                   "status_in_file": c["status"]}
+        claim = " ".join(it["text"] for it in c["items"].get("claim", []) if not it["ai"])
+        out.append(Subject("card", c["id"], claimcards.digest(c), "%s「%s」" % (c["id"], claim[:60]), content, st))
     return out
 
 
@@ -234,9 +252,22 @@ def presubmit_subject(proj):
         return sha256_file(p) if os.path.exists(p) else ""
     obj = {"kind": "presubmit", "manuscript": {rel(proj, p): sha256_file(p) for p in manuscript_files(proj)},
            "register": fh(os.path.join("sources", "register.csv")), "claims": fh(os.path.join("sources", "claims.csv")),
-           "style": fh(style.APPROVED_REL), "checklist": list(CHECKLIST_IDS)}
-    return Subject("presubmit", "submission", _d(obj), "提出物一式(原稿 %d 件・台帳・記法・チェックリスト)" % len(obj["manuscript"]),
+           "style": fh(style.APPROVED_REL), "checklist": list(CHECKLIST_IDS),
+           "cards": {rel(proj, p): sha256_file(p) for p in claimcards.card_files(proj)},
+           "provenance": provenance.digest(proj), "disclosure": disclosure_statements(proj)}
+    return Subject("presubmit", "submission", _d(obj), "提出物一式(原稿 %d 件・台帳・記法・主張カード・由来・開示文・チェックリスト)" % len(obj["manuscript"]),
                    obj, "")
+
+
+def disclosure_statements(proj):
+    """{rel path: sha256} of the AI-use disclosure statement drafts (disclosure/statement*.md)."""
+    d = os.path.join(proj, "disclosure")
+    out = {}
+    if os.path.isdir(d):
+        for fn in sorted(os.listdir(d)):
+            if fn.startswith("statement") and fn.endswith(".md"):
+                out["disclosure/" + fn] = sha256_file(os.path.join(d, fn))
+    return out
 
 
 def import_subject(docx_path):
@@ -311,7 +342,7 @@ def guarded_subject(proj, base_ref=None):
                    {"scope": sid, "files": sorted(files), "sha": files, "base_ref": base_ref or ""}, "")
 
 
-POOLS = {"source": sources, "claim": claims, "rule": rules, "comment": comments, "hunk": hunks,
+POOLS = {"source": sources, "card": cards, "claim": claims, "rule": rules, "comment": comments, "hunk": hunks,
          "section": sections, "ailog": ailog_days, "change": changes}
 
 

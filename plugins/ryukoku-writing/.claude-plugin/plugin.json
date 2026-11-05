@@ -1,15 +1,24 @@
 {
   "name": "ryukoku-writing",
   "displayName": "Ryukoku Writing (unofficial)",
-  "version": "1.0.0",
-  "description": "龍谷大学の学生向けのレポート・卒論の執筆支援(非公式。大学の公式の道具ではない)。問い・主張・本文は学生が書き、AI は問いかけ・資料の調査と実在確認・表記の統一の提案・レビューの問いを担う。AI は原稿に書けず、表記の統一も提案ファイルにして学生が一件ずつ採否を決める。VERIFIED・採否・承認・解決・署名は、学生の合言葉から作る Ed25519 の署名でだけ記録され、検査と CI(基準ブランチの道具)が照合する。調査の記録は検索のたびに自動で残る。",
+  "version": "2.0.0",
+  "description": "龍谷大学の学生向けのレポート・卒論の執筆支援(非公式。大学の公式の道具ではない)。主張の主は学生、文章化は AI と速く、検証は厳密に、記録は正直に。AI は学生の考えを聞き取って主張カードに整理し(学生の言葉の原文を残す)、主張と原稿を厳密に検証し(論理・根拠の対応・反証・新規性・主張のすり替え)、科目の AI 利用条件が許すときは確認済みの主張カード・台帳の文献・保存したデータだけを材料に原稿を書く。AI が書いた段落は由来として自動で記録され、開示の事実になる。文献は識別子で実在を確かめ、未確認の文献は原稿に入れない。合言葉の署名が要るのは VERIFIED と提出前の最終確認だけ。調査の記録は検索のたびに自動で残る。",
   "author": {
     "name": "imkoga002"
   },
   "homepage": "https://github.com/imkoga002/student-plugins",
   "repository": "https://github.com/imkoga002/student-plugins",
   "license": "MIT",
-  "keywords": ["academic-writing", "thesis", "japanese", "research-integrity", "human-review", "ryukoku", "unofficial"],
+  "keywords": [
+    "academic-writing",
+    "thesis",
+    "japanese",
+    "research-integrity",
+    "provenance",
+    "claim-verification",
+    "ryukoku",
+    "unofficial"
+  ],
   "userConfig": {
     "feedback_lang": {
       "type": "string",

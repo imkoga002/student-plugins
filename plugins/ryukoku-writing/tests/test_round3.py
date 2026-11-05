@@ -90,7 +90,7 @@ class NotebookCommand(Base):
     def test_notebook_prints_running_code_and_version(self):
         res = self.E.run([sys.executable, RKPY, "--project", self.P, "notebook", "--once"], cwd=self.P)
         self.assertIn(os.path.realpath(PLUGIN), res.stdout)
-        self.assertIn("版 1.", res.stdout)
+        self.assertIn("版 2.", res.stdout)
 
 
 # ------------------------------------------------------------ running code the AI wrote
@@ -178,7 +178,8 @@ class PassphraseLocation(Base):
         self.assertNotEqual(self.E.rk("check", plugin=True).returncode, 0)
 
     def test_terminal_shows_location_and_version_before_the_passphrase(self):
-        rc, out = self.E.tty(["optout"], ["y", PASS])
+        self.E.rk("ledger", "add-source", "--doi", "10.1038/s41598-023-41032-5", "--title", "A placeholder title", "--year", "2023")
+        rc, out = self.E.tty(["sign", "source", "S001", "--decision", "VERIFIED"], ["y", PASS])
         self.assertIn("動いているコード: %s(版 " % os.path.realpath(PLUGIN), out)
         self.assertLess(out.index("動いているコード"), out.index("合言葉(入力は表示されない)"))
 
@@ -192,7 +193,8 @@ class DetectionLayer(Base):
             subprocess.run([sys.executable, "-c", code], env=self.E.env(), check=True)
         r = run_in_window(self.E, evil, "t-m15")
         self.assertIn(MS, reason(r))
-        self.assertNotEqual(self.E.rk("check").returncode, 0)
+        # v2: the AI's manuscript write is recorded as provenance even though the shared baseline was rebuilt
+        self.assertIn('"actor": "ai"', self.E.read(".ryukoku", "provenance.jsonl"))
 
     def test_moving_the_marker_away_keeps_the_guard(self):
         cfg = self.E.path(".ryukoku", "config.yml")
@@ -204,10 +206,10 @@ class DetectionLayer(Base):
         run_in_window(self.E, 'D=manu; printf AI >> "${D}script/main.md"', "t-m16b")
         shutil.move(tmp, cfg)
         self.assertTrue(any(".ryukoku/config.yml" in " ".join(d.get("parts") or []) for d in detections(self.E)))
-        self.assertTrue(any(d.get("path") == MS for d in detections(self.E)))
+        self.assertIn('"file": "%s"' % MS, self.E.read(".ryukoku", "provenance.jsonl"))
 
     def test_removing_a_detection_and_rebuilding_the_chain_is_caught(self):
-        run_in_window(self.E, "D=manu; printf AI >> \"${D}script/main.md\"", "t-e1")
+        run_in_window(self.E, "Q=ques; printf '| Q9 | x | y | z |\\n' >> \"research/${Q}tions.md\"", "t-e1")
         from rklib import ailog
         rows = [o for o in ailog_lines(self.E) if o.get("type") != "detection"]
         p = self.E.path(".ryukoku", "ai-use-log.jsonl")
@@ -232,7 +234,7 @@ class DetectionLayer(Base):
         self.E.pre("Bash", ti, cwd=other, project_dir=other, tuid="t-o5")
         subprocess.run(["bash", "-c", cmd], cwd=other, env=self.E.env(), capture_output=True)
         self.E.post("Bash", ti, cwd=other, project_dir=other, tuid="t-o5")
-        self.assertTrue(any(d.get("path") == MS for d in detections(self.E)))
+        self.assertIn('"file": "%s"' % MS, self.E.read(".ryukoku", "provenance.jsonl"))
 
     def test_declined_ask_leaves_no_window(self):
         """An asked call the student declines (no PostToolUse) must not turn the student's later edit into
@@ -489,15 +491,21 @@ class BatchSigning(Base):
 
 # ------------------------------------------------------------ smaller findings
 class Misc(Base):
-    def test_prohibited_course_blocks_reads(self):
+    def test_prohibited_course_allows_reading_but_not_writing(self):
+        # v2: a prohibited course still allows verification and format checks, which need reading; writing the
+        # manuscript, drafting claim cards and proposals are denied
         from rklib.common import set_config_value
         set_config_value(self.P, "ai_policy", "prohibited")
-        for tool, ti in [("Grep", {"pattern": "要因"}), ("Glob", {"pattern": "**/*.md"}), ("Bash", {"command": "grep -r 要因 ."}),
-                         ("Bash", {"command": "python3 -c 'print(open(\"manuscript/main.md\").read())'"}),
-                         ("Read", {"file_path": self.E.path("research", "plan.md")})]:
+        for tool, ti in [("Grep", {"pattern": "要因"}), ("Glob", {"pattern": "**/*.md"}), ("Read", {"file_path": self.E.path("research", "plan.md")})]:
             with self.subTest(tool=tool, ti=str(ti)):
-                self.assertEqual(self.d(tool, ti), "deny")
+                self.assertEqual(self.d(tool, ti), "-")
+        self.assertEqual(self.d("Bash", {"command": "grep -r 要因 ."}), "-")
+        self.assertEqual(self.d("Bash", {"command": "python3 -c 'print(open(\"manuscript/main.md\").read())'"}), "deny")  # inline code naming the manuscript
         self.assertEqual(self.d("Bash", {"command": "python3 tools/rk/rk.py check"}), "-")
+        self.assertEqual(self.d("Write", {"file_path": self.E.path("manuscript", "main.md"), "content": "x"}), "deny")
+        self.assertEqual(self.d("Write", {"file_path": self.E.path("claims", "C001.md"), "content": "x"}), "deny")
+        self.assertEqual(self.d("Bash", {"command": "python3 tools/rk/rk.py propose start manuscript/main.md"}), "deny")
+        self.assertEqual(self.d("Bash", {"command": "python3 tools/rk/rk.py claims new --words x"}), "deny")
 
     def test_pandoc_export_is_not_a_manuscript_write(self):
         # not a manuscript write (no deny); pandoc is not on the allow-list (Lua filters run code), so it asks
@@ -592,7 +600,7 @@ class GitIdentity(unittest.TestCase):
                 e["GIT_CONFIG_GLOBAL"] = os.path.join(E.base, "no-gitconfig")
                 return e
             E.env = env
-            answers = ["", PASS, PASS, "", "a", "", "", "y", PASS, "g", "student-x", "s@example.test"]
+            answers = ["", "", "a", "", "", "y", "y", PASS, PASS, "g", "student-x", "s@example.test"]
             rc, out = E.tty(["setup"], answers)
             self.assertEqual(rc, 0, out[-2000:])
             r = subprocess.run(["git", "-C", E.proj, "log", "--format=%an <%ae>"], capture_output=True, text=True, env=env())
