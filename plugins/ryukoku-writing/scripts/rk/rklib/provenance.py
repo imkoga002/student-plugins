@@ -25,7 +25,7 @@ import re
 import time
 
 from . import paragraphs as P
-from .common import (FileLock, load_config, manuscript_files, read_text, rel, sha256_bytes, state_dir, today,
+from .common import (FileLock, load_config, note_written, manuscript_files, read_text, rel, sha256_bytes, state_dir, today,
                      now_iso, tr)
 
 PROV_REL = os.path.join(".ryukoku", "provenance.jsonl")
@@ -98,6 +98,7 @@ def _append(proj, objs):
                 o.setdefault("ts", now_iso())
                 line = json.dumps(o, ensure_ascii=False, sort_keys=True)
                 f.write(line + "\n")
+                note_written(proj, PROV_REL, [line])
                 prev = line_hash(line)
                 out.append(o)
         try:
@@ -209,7 +210,7 @@ def _source_ids(proj, keys):
 
 
 # ------------------------------------------------------------------------------------------------ recording
-def record(proj, relp, old_text, new_text, actor, tool="", materials=None, estimated=False):
+def record(proj, relp, old_text, new_text, actor, tool="", materials=None, estimated=False, uncertain=False):
     """Record every block that differs between OLD_TEXT and NEW_TEXT of RELP, then remember NEW_TEXT."""
     pol = load_config(proj).get("ai_policy") or "unknown"
     objs = []
@@ -241,12 +242,14 @@ def record(proj, relp, old_text, new_text, actor, tool="", materials=None, estim
                      "lines": [b["start"], b["end"]], "sha": w["sha"] if w else "", "from_sha": o["sha"] if o else "",
                      "section": b["section"], "chars": len(P.norm(w["text"])) if w else 0, "block": b["kind"],
                      "materials": mats, "tool": tool or "", "policy": pol})
+        if uncertain:
+            objs[-1]["uncertain"] = True
     out = _append(proj, objs)
     set_known(proj, relp, new_text)
     return out
 
 
-def sync_student(proj, relp=None, before=None):
+def sync_student(proj, relp=None, before=None, uncertain=False):
     """Record what changed since the last recorded text as the student's (estimated). With RELP and BEFORE (the
     text at the start of an AI tool call) only that file is compared with BEFORE. Returns the new entries."""
     out = []
@@ -256,7 +259,7 @@ def sync_student(proj, relp=None, before=None):
             set_known(proj, relp, before)
             return out
         if (before or "") != known:
-            out += record(proj, relp, known, before or "", "student", "editor", estimated=True)
+            out += record(proj, relp, known, before or "", "student", "editor", estimated=True, uncertain=uncertain)
         return out
     files = {rel(proj, p): p for p in manuscript_files(proj)}
     kdir = _pdir(proj, "files")
@@ -272,7 +275,7 @@ def sync_student(proj, relp=None, before=None):
                 set_known(proj, r, cur)  # first sight: nothing to compare with (paragraphs stay "unrecorded")
             continue
         if cur != known:
-            out += record(proj, r, known, cur or "", "student", "editor", estimated=True)
+            out += record(proj, r, known, cur or "", "student", "editor", estimated=True, uncertain=uncertain)
             if cur is None:
                 set_known(proj, r, None)
     return out
@@ -302,7 +305,8 @@ def record_ai(proj, relp, before, after, tool):
 def attribution(proj, texts=None):
     """{file: [{"start", "end", "sha", "section", "chars", "origin", "entry"}]} for the current paragraphs.
     origin: ai_wrote / ai_edited / student_after_ai (the student changed an AI paragraph; estimated) / student
-    (estimated) / unrecorded (written before recording started, or by a way that left no record)."""
+    (estimated) / uncertain (changed while an AI tool call was open but never finished; counted with the AI's) /
+    unrecorded (written before recording started, or by a way that left no record)."""
     ents = entries(proj)
     by_sha = {}
     for i, e in enumerate(ents):
@@ -336,6 +340,8 @@ def attribution(proj, texts=None):
                 e = ents[i]
                 if e.get("actor") == "ai":
                     origin = e.get("kind") if e.get("kind") in AI_KINDS else "ai_wrote"
+                elif e.get("uncertain"):
+                    origin = "uncertain"
                 else:
                     origin = "student_after_ai" if ai_in_chain(f, i) else "student"
             rows.append({"start": b["start"], "end": b["end"], "sha": b["sha"], "section": b["section"], "block": b["kind"],
@@ -345,7 +351,8 @@ def attribution(proj, texts=None):
     return out
 
 
-ORIGINS = ("ai_wrote", "ai_edited", "student_after_ai", "student", "unrecorded")
+ORIGINS = ("ai_wrote", "ai_edited", "uncertain", "student_after_ai", "student", "unrecorded")
+AI_SIDE = ("ai_wrote", "ai_edited", "uncertain")  # counted as the AI's in the facts and the policy check
 
 
 def summary(proj):

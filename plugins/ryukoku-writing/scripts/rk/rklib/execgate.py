@@ -27,18 +27,30 @@ The scan returns findings (kind, detail):
   ("ai_file", path)      the command names a file the AI wrote or changed (by path or content hash): stronger wording
   ("outside_code", path) an interpreter runs code outside the plugin (it could fake the passphrase page)
   ("notebook_ok", path) / ("notebook_bad", path) / ("human", path)  the evidence notebook / a human-only command
+  ("protected_write", "class<TAB>path")  a redirect or a write command reaches a path of that class (paths.classify,
+                         after quotes, backslashes, globs and cd were resolved as bash would)
+  ("unknown_target", text) a write whose target cannot be determined (a variable, an unresolvable glob, a relative
+                         path after a cd the scanner could not follow)
+Paths are classified after lexing, never on the raw command string: `man\\uscript/main.md` is manuscript/main.md, and
+`cd m?nuscript` is followed to manuscript/ when the glob names exactly one directory (bash does the same).
 """
+import glob as _glob
 import hashlib
 import json
 import os
 import re
 import time
 
-from .common import state_home
+from . import paths
+from .common import HUMAN_COMMANDS, state_home
 
 AI_FILES = "ai-written.json"
-HUMAN = {"setup", "apply", "verify", "style", "resolve", "signoff", "disclose", "changes", "optout", "import-docx",
-         "sign", "trust", "update-tools"}
+HUMAN = set(HUMAN_COMMANDS)
+# commands whose (non-option) arguments may be written: a protected target among them is denied, whatever else
+WRITE_CMDS = {"tee", "cp", "mv", "dd", "install", "rsync", "ln", "truncate", "rm", "rmdir", "touch", "unlink", "shred",
+              "patch", "split", "csplit", "chmod", "chown", "mkdir", "ed", "ex"}
+INPLACE_CMDS = {"sed", "perl", "ruby"}            # write their file arguments only with -i / --in-place
+OUTPUT_OPT_CMDS = {"pandoc", "curl", "wget", "iconv", "sort", "tree", "uniq"}  # write the value of -o / --output
 PY_NAMES = {"python3", "python", "py"}
 PY_FLAGS = {"-B", "-I", "-u", "-E", "-s", "-S", "-O", "-OO", "-q", "-3"}
 SH_NAMES = {"bash", "sh"}
@@ -320,6 +332,7 @@ class Scan(object):
         self.plugin_root = os.path.realpath(plugin_root) if plugin_root else ""
         self.proj = os.path.realpath(proj) if proj else ""
         self.found = []
+        self.cwd_unknown = False
         self._tools_ok = None
         self.ai = ai_files()
         self.ai_shas = {v.get("sha") for v in self.ai.values() if isinstance(v, dict) and v.get("sha")}
@@ -327,6 +340,38 @@ class Scan(object):
     def add(self, kind, what):
         if (kind, what) not in self.found:
             self.found.append((kind, what))
+
+    def _resolve(self, text, glob, cwd):
+        """The path bash would use for TEXT: a glob that names exactly one existing path is expanded."""
+        p = self._abs(text, cwd)
+        if glob:
+            hits = _glob.glob(p)
+            if len(hits) == 1:
+                return hits[0]
+        return p
+
+    def classify_target(self, text, dyn, glob, cwd, what):
+        """Record a protected or unknown write target. Returns the class (or 'unknown')."""
+        if text in SAFE_REDIRECT_TARGETS:
+            return "other"
+        rel_like = not (text.startswith("/") or text.startswith("~") or re.match(r"^[A-Za-z]:[\\/]", text))
+        if dyn or (rel_like and self.cwd_unknown):
+            self.add("unknown_target", "%s %s" % (what, text))
+            base = os.path.basename(text.replace("\\", "/").rstrip("/")).lower()
+            if base in paths.PROTECTED_NAMES or not dyn and glob:
+                self.add("protected_write", "unknown\t%s" % text)
+            return "unknown"
+        p = self._resolve(text, glob, cwd)
+        cls = paths.classify_abs(p, self.proj) if self.proj else paths.classify(p)
+        if glob and len(_glob.glob(self._abs(text, cwd))) != 1:
+            # several or no matches: bash refuses or uses the pattern literally; classify the pattern's spellings too
+            for hit in _glob.glob(self._abs(text, cwd)):
+                c2 = paths.classify_abs(hit, self.proj)
+                if c2 in paths.PROTECTED:
+                    cls = c2
+        if cls in paths.PROTECTED or cls in ("ci", "claims", "bibliography", "proposals"):
+            self.add("protected_write", "%s\t%s" % (cls, p))
+        return cls
 
     def _abs(self, word, cwd):
         w = word.replace("\\", "/")
@@ -391,7 +436,8 @@ class Scan(object):
                 continue
             if text in SAFE_REDIRECT_TARGETS:
                 continue
-            if dyn or glob:
+            self.classify_target(text, dyn, glob, cwd, ">")
+            if dyn or glob or self.cwd_unknown:
                 self.add("ask", "> %s(書き込み先を特定できない)" % text)
                 continue
             p = os.path.realpath(self._abs(text, cwd))
@@ -421,15 +467,43 @@ class Scan(object):
         self.note_ai_files(words, cwd)
         self._redirects(reds, cwd)
         base = name
+        bname = os.path.basename(base)
+        inplace = bname in INPLACE_CMDS and any(re.match(r"^-[a-zA-Z]*i|^--in-place", a) for a in args)
+        if bname in WRITE_CMDS or inplace:
+            for text, dyn, glob in words[1:]:
+                if text.startswith("-") and "=" not in text:
+                    continue
+                for cand in ([text.split("=", 1)[1]] if re.match(r"^[A-Za-z]+=", text) else [text]):
+                    if cand and not cand.startswith("-"):
+                        self.classify_target(cand, dyn, glob, cwd, bname)
+        elif bname in OUTPUT_OPT_CMDS:
+            for k, (text, dyn, glob) in enumerate(words[1:]):
+                if text in ("-o", "--output", "-O") and k + 2 < len(words):
+                    t2 = words[k + 2]
+                    self.classify_target(t2[0], t2[1], t2[2], cwd, bname)
+                elif text.startswith("--output="):
+                    self.classify_target(text.split("=", 1)[1], dyn, glob, cwd, bname)
         if base in VERSION_ONLY:
             if [a for a in args if not a.startswith("-")] == [] and all(a in ("--version", "-v", "-V", "--help", "-h") for a in args) and args:
                 return cwd
             self.add("ask", "%s %s(--version 以外の起動は外部のプログラムを動かしうる)" % (base, " ".join(args[:3])))
             return cwd
         if base == "cd":
-            if args and not words[1][1] and not words[1][2]:
-                return os.path.normpath(os.path.join(cwd, os.path.expanduser(args[0])))
-            return cwd
+            if not args or args[0] == "-":
+                if args:
+                    self.cwd_unknown = True
+                return cwd
+            text, dyn, glob = words[1]
+            if dyn:
+                self.cwd_unknown = True  # cd "$D": every later relative write target is unknown
+                return cwd
+            if glob:
+                hits = [h for h in _glob.glob(self._abs(text, cwd)) if os.path.isdir(h)]
+                if len(hits) != 1:
+                    self.cwd_unknown = True
+                    return cwd
+                return os.path.normpath(hits[0])
+            return os.path.normpath(os.path.join(cwd, os.path.expanduser(text.replace("\\", "/"))))
         if base in PY_NAMES:
             return self.python(name, args, cwd)
         if base in SH_NAMES:
@@ -543,6 +617,9 @@ class Scan(object):
         if k >= len(args) or args[k].startswith("-"):
             self.add("ask", "%s %s(Plugin の外のコード。インラインのコードやモジュールの実行)" % (name, " ".join(args[:3])))
             return cwd
+        if self.cwd_unknown and not os.path.isabs(args[k]):
+            self.add("ask", "%s %s(cd の行き先を特定できないので、実行するファイルも特定できない)" % (name, args[k]))
+            return cwd
         script = self._abs(args[k], cwd)
         rest = args[k + 1:]
         if not self.shipped(script):
@@ -579,12 +656,16 @@ class Scan(object):
         k = 0
         while k < len(args) and args[k] in ("-e", "-u", "--norc", "--noprofile"):
             k += 1
-        if k < len(args) and not args[k].startswith("-") and self.shipped(self._abs(args[k], cwd)):
+        if k < len(args) and not args[k].startswith("-") and not (self.cwd_unknown and not os.path.isabs(args[k])) \
+                and self.shipped(self._abs(args[k], cwd)):
             return cwd
         self.add("ask", "%s %s(シェルはどんなコマンドも実行できる)" % (name, " ".join(args[:3])))
         return cwd
 
     def path_exec(self, name, args, cwd):
+        if self.cwd_unknown and not os.path.isabs(name):
+            self.add("ask", "%s(cd の行き先を特定できないので、実行するファイルも特定できない)" % name)
+            return cwd
         p = self._abs(name, cwd)
         real = os.path.realpath(p)
         if self.proj and real == os.path.realpath(os.path.join(self.proj, "rk")) and self.launcher_ok(real):

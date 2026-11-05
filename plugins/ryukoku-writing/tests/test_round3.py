@@ -66,26 +66,21 @@ class NotebookCommand(Base):
         return self.E.run(argv + [], cwd=self.P)
 
     def test_advised_commands_really_run(self):
-        """The command SessionStart, the deny reason and the skill advise is executed (not string-matched)."""
-        r = self.E.hook("session-start.sh", {"cwd": self.P, "session_id": "s1"})
-        txt = reason(r)
-        line = next(x for x in txt.splitlines() if "scripts/rk/rk.py" in x and "notebook" in x)
-        cmd = line[line.index("python3"):].strip()
-        res = self._run_advised(cmd)
-        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-        self.assertIn("http://127.0.0.1:", res.stdout)
-        # the deny reason for a wrong start gives the same, runnable command
-        dr = reason(self.E.pre("Bash", {"command": "./rk notebook"}))
-        cmd2 = dr[dr.index("python3"):].split("\n")[0].strip()
-        self.assertEqual(self._run_advised(cmd2).returncode, 0)
-        # the skill's form, with the placeholders filled in
+        """SessionStart, the deny reason and the skill all send the student to ./rk notebook at their terminal; the
+        command runs (the --once probe), and without a terminal the server refuses to start (no key would reach anyone)."""
+        txt = reason(self.E.hook("session-start.sh", {"cwd": self.P, "session_id": "s1"}))
+        self.assertIn("./rk notebook", txt)
+        self.assertIn("./rk notebook", reason(self.E.pre("Bash", {"command": "./rk notebook"})))
         sk = open(os.path.join(PLUGIN, "skills", "notebook", "SKILL.md"), encoding="utf-8").read()
-        form = next(x for x in sk.splitlines() if x.startswith("python3") and "notebook" in x)
-        form = form.replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN).replace("<プロジェクトの絶対パス>", self.P)
-        self.assertEqual(self._run_advised(form).returncode, 0)
-        # both argument orders are accepted
-        res = self.E.run([sys.executable, RKPY, "notebook", "--project", self.P, "--once"], cwd=self.P)
-        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("./rk notebook", sk)
+        for argv in ([RKPY, "--project", self.P, "notebook", "--once"], [RKPY, "notebook", "--project", self.P, "--once"]):
+            res = self.E.run([sys.executable] + argv, cwd=self.P)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("http://127.0.0.1:", res.stdout)
+            self.assertNotIn("#k=", res.stdout)
+        res = self.E.run([sys.executable, RKPY, "--project", self.P, "notebook", "--port", "0"], cwd=self.P, timeout=60)
+        self.assertEqual(res.returncode, 3, res.stdout + res.stderr)
+        self.assertNotIn("#k=", res.stdout + res.stderr)
 
     def test_notebook_prints_running_code_and_version(self):
         res = self.E.run([sys.executable, RKPY, "--project", self.P, "notebook", "--once"], cwd=self.P)
@@ -134,7 +129,7 @@ class ExecGate(Base):
             with self.subTest(c=c):
                 self.assertEqual(self.d("Bash", {"command": c, "run_in_background": True}), "deny")
         ok = 'python3 "%s/scripts/rk/rk.py" --project "%s" notebook' % (PLUGIN, self.P)
-        self.assertEqual(self.d("Bash", {"command": ok, "run_in_background": True}), "-")
+        self.assertEqual(self.d("Bash", {"command": ok, "run_in_background": True}), "deny")  # v2: the student starts it
 
     def test_state_home_and_claude_settings_are_denied(self):
         for tool, ti in [("Write", {"file_path": os.path.join(self.E.state, "plugin-root"), "content": "/x"}),
@@ -199,11 +194,13 @@ class DetectionLayer(Base):
     def test_moving_the_marker_away_keeps_the_guard(self):
         cfg = self.E.path(".ryukoku", "config.yml")
         tmp = os.path.join(self.E.base, "config.yml.away")
-        run_in_window(self.E, 'D=.ryu; mv "${D}koku/config.yml" %s' % shlex.quote(tmp), "t-m16a")
+        run_in_window(self.E, "python3 -c \"import shutil; shutil.move('.ryu'+'koku/config.yml', %r)\"" % tmp, "t-m16a")
         # with the marker gone the folder is still guarded (registered project)
         self.assertEqual(self.d("Write", {"file_path": self.E.path(MS), "content": "AI"}), "deny")
         self.assertEqual(self.d("Bash", {"command": "printf AI >> manuscript/main.md"}), "deny")
-        run_in_window(self.E, 'D=manu; printf AI >> "${D}script/main.md"', "t-m16b")
+        # a variable target is denied too while the settings are gone; a route the hook cannot see is still recorded
+        self.assertEqual(self.d("Bash", {"command": 'D=manu; printf AI >> "${D}script/main.md"'}), "deny")
+        run_in_window(self.E, "python3 -c \"open('manu'+'script/main.md','a').write('AI')\"", "t-m16b")
         shutil.move(tmp, cfg)
         self.assertTrue(any(".ryukoku/config.yml" in " ".join(d.get("parts") or []) for d in detections(self.E)))
         self.assertIn('"file": "%s"' % MS, self.E.read(".ryukoku", "provenance.jsonl"))
@@ -393,7 +390,8 @@ class CommentsAndLogs(Base):
         port = app_srv.server_address[1]
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
         c.request(method, path, body=json.dumps(body) if body is not None else None,
-                  headers={"Content-Type": "application/json", "X-RK-Request": "1", "Host": "127.0.0.1:%d" % port})
+                  headers={"Content-Type": "application/json", "X-RK-Request": "1", "Host": "127.0.0.1:%d" % port,
+                           "X-RK-Session": app_srv.app.session})
         r = c.getresponse()
         return r.status, json.loads(r.read() or b"{}")
 
@@ -430,7 +428,10 @@ class CommentsAndLogs(Base):
         json.dump([{"id": "walters2023", "author": [{"family": "Walters"}], "issued": {"date-parts": [[2023]]}}],
                   open(self.E.path("sources", "references.json"), "w"))
         run_in_window(self.E, "true", "t-base")
-        r = run_in_window(self.E, ": > research/search-lo''g.jsonl", "t-sl")
+        # the shell form is denied up front (the lexer reads search-lo''g.jsonl as search-log.jsonl) ...
+        self.assertEqual(self.d("Bash", {"command": ": > research/search-lo''g.jsonl"}), "deny")
+        # ... and a route the hook cannot see is detected
+        r = run_in_window(self.E, "Q=search-lo; python3 -c \"open('research/'+'$Q'+'g.jsonl','w').close()\"", "t-sl")
         self.assertIn("search-log.jsonl", reason(r))
         r = run_in_window(self.E, "sed -e s/Walters/Other/ sources/references.json > /tmp/r.$$ && cat /tmp/r.$$ > sources/references.json", "t-ref")
         self.assertIn("references.json", reason(r))

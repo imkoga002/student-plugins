@@ -12,6 +12,14 @@ Tabs, Host/Origin checks, ARIA and both languages:
     is no "accept all" request.
   * The AI may start this server (the passphrase is needed for anything that counts); the code always runs from
     the installed plugin, never from the project (rk.py notebook refuses the project copy, which an AI tool could have rewritten).
+  * Every /api/ request needs the session key (header X-RK-Session). The key is made at server start, is never
+    served by an endpoint and never written to stdout or to a file: it is printed only on the student's terminal
+    (/dev/tty), as the #k=... fragment of the URL, which the browser does not send to the server. That is why the
+    student starts this page with ./rk notebook in their own terminal: an AI tool call has no terminal, so a page the
+    AI started could not be used, and a request the AI makes with curl has no key. The page keeps the key in
+    sessionStorage and drops the fragment from the address bar. Limits: a program running with the student's rights
+    can read the terminal or the browser's storage, or run its own server; the key stops prompt-less requests, not
+    a program the student allowed.
   * Writes that are not decisions: a new comment or reply by the student, reopening a comment, and the reason for
     selecting a search result.
   * Five wrong passphrases lock signing for a while (exponential), to stop guessing through the screen.
@@ -48,6 +56,7 @@ class App(object):
         self.proj = os.path.abspath(proj)
         self.port = port
         self.secret = secrets.token_bytes(32)
+        self.session = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.fails = 0
         self.locked_until = 0.0
@@ -304,6 +313,13 @@ def make_handler(app):
                 return False
             return True
 
+        def _session_ok(self):
+            if not hmac.compare_digest(str(self.headers.get("X-RK-Session") or ""), app.session):
+                self._send(403, {"error": "この画面の鍵がない。自分の端末で ./rk notebook を実行し、その端末に表示された URL から開く"
+                                          " / no session key: open the URL that ./rk notebook printed in your own terminal"})
+                return False
+            return True
+
         def _body(self):
             o = self.headers.get("Origin")
             if o is not None and o not in allowed_origins:
@@ -338,6 +354,8 @@ def make_handler(app):
                 if u.path == "/":
                     blob = json.dumps(app.boot(), ensure_ascii=False).replace("</", "<\\/")
                     return self._send(200, raw=html_tpl.replace("/*__BOOT__*/null", blob).encode("utf-8"), ctype="text/html; charset=utf-8")
+                if not self._session_ok():
+                    return
                 if u.path == "/api/state":
                     return self._send(200, app.state())
                 if u.path == "/api/list":
@@ -360,6 +378,8 @@ def make_handler(app):
 
         def do_POST(self):
             if not self._host_ok():
+                return
+            if not self._session_ok():
                 return
             body = self._body()
             if body is None:
@@ -431,14 +451,23 @@ def serve(proj, port=0, open_browser=False, once=False):
     if problem:
         print(problem, file=sys.stderr)
         return 3
+    from rklib import sign as _sign
+    if not once and not _sign.tty_available():
+        print(("証拠ノートは、自分の端末(ターミナル)で ./rk notebook を実行して開く。画面の鍵はその端末にだけ表示する"
+               "(AI のツールの呼び出しには端末が無いので、ここでは起動しない)。" if lang != "en" else
+               "Open the evidence notebook with ./rk notebook in your own terminal; the page's key is shown only there "
+               "(an AI tool call has no terminal, so it is not started here)."), file=sys.stderr)
+        return 3
     srv = make_server(proj, port)
     url = "http://127.0.0.1:%d/" % srv.server_address[1]
-    print(("証拠ノート: %s\n(127.0.0.1 だけ・外部通信なし。終了は Ctrl+C。合言葉が要るのは VERIFIED と提出前の最終確認だけで、この画面の署名の欄にだけ入れる。チャットには入れない)" if lang != "en" else
-           "Evidence notebook: %s\n(127.0.0.1 only, no external requests; Ctrl+C to stop. Only VERIFIED and the final confirmation need the passphrase; type it only into this page's sign box, never into the chat.)") % url, flush=True)
-    if open_browser:
-        webbrowser.open(url)
+    print(("証拠ノート: %s(この URL だけでは開けない。鍵つきの URL は端末にだけ表示する)\n(127.0.0.1 だけ・外部通信なし。終了は Ctrl+C。合言葉が要るのは VERIFIED と提出前の最終確認だけで、この画面の署名の欄にだけ入れる。チャットには入れない)" if lang != "en" else
+           "Evidence notebook: %s (this URL alone does not open it; the URL with its key is shown on the terminal only)\n(127.0.0.1 only, no external requests; Ctrl+C to stop. Only VERIFIED and the final confirmation need the passphrase; type it only into this page's sign box, never into the chat.)") % url, flush=True)
     if once:
         return 0
+    keyed = url + "#k=" + srv.app.session
+    _sign.tty_print(("開く URL(鍵つき。チャットに貼らない): %s" if lang != "en" else "Open this URL (it carries the key; never paste it into the chat): %s") % keyed)
+    if open_browser:
+        webbrowser.open(keyed)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

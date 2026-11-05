@@ -125,18 +125,22 @@ def facts(proj, lang="ja"):
     if s["paragraphs"]:
         bo = s["by_origin"]
         pct = lambda n: (100.0 * n / s["paragraphs"]) if s["paragraphs"] else 0.0  # noqa: E731
-        ai_n = bo["ai_wrote"][0] + bo["ai_edited"][0]
+        ai_n = sum(bo[o][0] for o in provenance.AI_SIDE)
         if en:
             L.append("5. Provenance of the manuscript (.ryukoku/provenance.jsonl; the student's own edits are estimated from the differences between AI tool calls):")
             L.append("   - paragraphs: %d; written by the AI %d (%.0f%%, %d chars), revised by the AI %d (%.0f%%), AI paragraphs then revised by the student %d, "
                      "the student's (estimated) %d, unrecorded (before recording started) %d" % (
                          s["paragraphs"], bo["ai_wrote"][0], pct(bo["ai_wrote"][0]), bo["ai_wrote"][1], bo["ai_edited"][0], pct(bo["ai_edited"][0]),
                          bo["student_after_ai"][0], bo["student"][0], bo["unrecorded"][0]))
+            if bo["uncertain"][0]:
+                L.append("   - possibly the AI's (changed while an AI tool call was open and never finished; counted with the AI's): %d" % bo["uncertain"][0])
         else:
             L.append("5. 原稿の由来(.ryukoku/provenance.jsonl。学生の編集は AI のツール実行の間の差分からの推定):")
             L.append("   - 段落 %d のうち、AI が新しく書いた %d(%.0f%%、%d 字)・AI が直した %d(%.0f%%)・AI の段落を学生が直した %d・学生(推定)%d・記録の開始前 %d"
                      % (s["paragraphs"], bo["ai_wrote"][0], pct(bo["ai_wrote"][0]), bo["ai_wrote"][1], bo["ai_edited"][0], pct(bo["ai_edited"][0]),
                         bo["student_after_ai"][0], bo["student"][0], bo["unrecorded"][0]))
+            if bo["uncertain"][0]:
+                L.append("   - AI の可能性(AI のツール実行が終わらないまま重なった変化。AI の側に数える): %d" % bo["uncertain"][0])
         for (f, sec), v in sorted(s["per_section"].items()):
             n = v["ai_wrote"] + v["ai_edited"]
             if n or v["student_after_ai"]:

@@ -55,7 +55,10 @@ from .common import (load_config, manuscript_files, register_project, rel, sha25
                      state_home, trust_path)
 
 MAX_FILE = 20 * 1024 * 1024
-WINDOW_STALE = 12 * 60
+# A window stays open until its PostToolUse, however long the tool runs (what changes meanwhile is the AI's). Only a
+# window older than this, whose PostToolUse never came (a crashed call), is dropped; the changes the next
+# comparison finds are then recorded with "uncertain": true and counted with the AI's in the facts.
+WINDOW_STALE = 6 * 3600
 TREES = ("tools", "thinking", "disclosure", ".github", ".githooks", "pandoc")
 FILES = (".ryukoku/config.yml", ".ryukoku/signers.json", ".ryukoku/style.yml", "research/questions.md",
          "rk", "rk.cmd", "rk.ps1", ".claude/settings.json", ".claude/settings.local.json")
@@ -114,6 +117,23 @@ def refs_map(proj):
     """{id: [family names, year]} of sources/references.json (what the citation proposals are checked against)."""
     from .proposals import _refs
     return {k: [list(v[0]), v[1]] for k, v in _refs(proj).items()}
+
+
+LEDGERED = (".ryukoku/ai-use-log.jsonl", ".ryukoku/provenance.jsonl", "review/annotations-log.jsonl")
+
+
+def _foreign_lines(proj, relp, start):
+    """Lines appended after byte START of RELP whose hash the plugin's code did not note (common.note_written)."""
+    from .common import written_hashes
+    p = os.path.join(proj, relp)
+    try:
+        with open(p, "rb") as f:
+            f.seek(start)
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return 0
+    known = written_hashes(proj, relp)
+    return sum(1 for ln in tail.splitlines() if ln.strip() and sha256_bytes(ln.rstrip("\r").encode("utf-8")) not in known)
 
 
 def _len(p):
@@ -239,7 +259,15 @@ def pre(proj, tool_use_id="", mode="run"):
     """Open a window. MODE 'ask': the student is asked first; the window only counts if PostToolUse comes."""
     register_project(proj)
     st = state_dir(proj)
+    raw = _load(os.path.join(st, "open.json"), {})
     w = _windows(st)
+    expired = [k for k in raw if k not in w]
+    for k in expired:
+        shutil.rmtree(_wdir(st, k), ignore_errors=True)
+        try:
+            os.remove(_wpath(st, k))
+        except OSError:
+            pass
     for k in [k for k, v in w.items() if v.get("ask")]:
         w.pop(k)  # a call that asked and got no PostToolUse was declined
         shutil.rmtree(_wdir(st, k), ignore_errors=True)
@@ -251,7 +279,9 @@ def pre(proj, tool_use_id="", mode="run"):
     if not w or old is None or "append" not in old:
         if not w:
             try:
-                provenance.sync_student(proj)  # what changed since the last call is the student's (estimated)
+                # what changed since the last call is the student's (estimated); after a window was dropped unfinished,
+                # it may be the AI's (uncertain)
+                provenance.sync_student(proj, uncertain=bool(expired))
             except OSError:
                 pass
         base = _baseline(proj, st, old)
@@ -392,6 +422,12 @@ def post(proj, tool="", summary="", tool_use_id="", command="", file_path=""):
         p = os.path.join(proj, r)
         if _len(p) < int(n0 or 0) or (n0 and _prefix_hash(p, int(n0)) != h0):
             other.append("%s(追記でない変更: 行の削除・書き換え)" % key)
+        elif key in LEDGERED:
+            # an append during this call must be a line the plugin's own code wrote (noted outside the project);
+            # this runs before the hook writes its own provenance lines for this call
+            n = _foreign_lines(proj, r, int(n0 or 0))
+            if n:
+                other.append("%s(AI のツール実行中に、Plugin の道具が書いていない行 %d 件の追加)" % (key, n))
     oref, nref = ref.get("refs") or {}, refs_map(proj)
     moved = sorted(k for k in oref if k not in nref or nref[k] != oref[k])
     if moved:

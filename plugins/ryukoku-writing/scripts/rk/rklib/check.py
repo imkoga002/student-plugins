@@ -191,10 +191,12 @@ def check_sections(proj, idx, rep, stage, base_ref):
 
 
 def check_config(proj, idx, rep, stage):
+    from .common import config_problems
+    for x in config_problems(proj):
+        rep.err(rep.t(".ryukoku/config.yml: %s。この間、AI の原稿への書き込みはフックが止める(./rk setup で直す)",
+                      ".ryukoku/config.yml: %s. Until fixed, the hooks deny AI writes to the manuscript (fix it with ./rk setup)") % x)
     cfg = load_config(proj)
     pol = cfg.get("ai_policy") or "unknown"
-    if pol not in ("allowed", "limited", "prohibited", "unknown"):
-        rep.err(rep.t(".ryukoku/config.yml の ai_policy が不正: %r(allowed / limited / prohibited / unknown)", "invalid ai_policy in .ryukoku/config.yml: %r (allowed / limited / prohibited / unknown)") % pol)
     if pol == "unknown":
         (rep.err if stage == "submit" else rep.warn)(rep.t(
             "科目の AI 利用条件が未確認(ai_policy: unknown)。シラバスを確かめ、迷ったら担当教員に相談する(ガイドラインⅢ-3)。確かめたら自分の端末で ./rk setup",
@@ -251,63 +253,58 @@ def check_searchlog(proj, rep):
 
 
 def check_citations(proj, idx, rep, stage):
-    keys = set()
+    """Every bibliography entry the manuscript would render ([@key], @{key}, nocite, nocite '@*') must be in the
+    ledger at IDENTITY_CONFIRMED (an error at submission, a warning while drafting), and at submission each must be
+    signed VERIFIED by the student. Author-year mentions in plain prose cannot be checked (README)."""
+    from . import citations
+    texts = []
     for p in manuscript_files(proj):
         text = read_text(p)
+        texts.append(text)
         if criticmarkup.has_markup(text):
             (rep.err if stage == "submit" else rep.warn)(rep.t("CriticMarkup の記号が原稿に残っている: %s", "CriticMarkup marks remain in the manuscript: %s") % rel(proj, p))
-        keys |= set(re.findall(r"(?<![\w.])-?@([A-Za-z0-9_][A-Za-z0-9_:.#$%&+?<>~/-]*)", re.sub(r"`[^`]*`", "", text)))
-    keys = {k.rstrip(".:,;") for k in keys if not k.startswith(("fig:", "tbl:", "sec:", "eq:", "lst:"))}
-    reg = ledger.read(ledger.paths(proj)[0], ledger.REGISTER)
-    by_key = {}
-    for r in reg:
-        for k in (r.get("citekey"), r.get("id")):
-            if k:
-                by_key[k] = r
-    known = set(by_key)
-    try:
-        with open(os.path.join(proj, "sources", "references.json"), encoding="utf-8") as f:
-            known |= {str(x.get("id")) for x in json.load(f) if isinstance(x, dict)}
-    except (OSError, ValueError):
-        pass
-    unknown = sorted(k for k in keys if k not in by_key)
+    keys, star = citations.rendered(proj, texts)
     bad = (rep.err if stage == "submit" else rep.warn)
+    probs = citations.problems(proj, keys)
+    unknown = [k for k, why in probs if why == "not_in_ledger"]
     if unknown:
-        bad(rep.t("原稿の引用キーが台帳(register.csv)にない(実在を確かめていない文献は原稿に入れない): %s",
-                  "citation keys not in the ledger (register.csv); unchecked sources do not go into the manuscript: %s") % ", ".join(unknown[:10]))
-    srcs = {s.sid: s for s in subjects.sources(proj)}
-    for k in sorted(keys):
-        r = by_key.get(k)
-        if not r:
+        bad(rep.t("原稿が出す参考文献(引用キー%s)が台帳(register.csv)にない(実在を確かめていない文献は原稿に入れない): %s",
+                  "bibliography entries the manuscript renders (citation keys%s) are not in the ledger (register.csv); unchecked sources do not go into the manuscript: %s")
+            % (rep.t("・nocite の @* を含む", ", nocite '@*' included") if star else "", ", ".join(unknown[:10])))
+    for k, why in probs:
+        if why == "not_in_ledger":
             continue
-        ms = (r.get("machine_status") or "CANDIDATE").strip()
-        s = srcs.get(r.get("id"))
-        human_ok = bool(s and s.claimed == "VERIFIED" and sign.current(idx, "source", s.sid, s.digest, ("VERIFIED",)))
-        if ms != "IDENTITY_CONFIRMED":
-            note = (r.get("human_note") or "").strip()
-            if human_ok and note:
-                rep.warn(rep.t("引用 %s(%s)は機械の確認が %s。原典を確かめた署名とメモ(%s)があるので注意にとどめる",
-                               "%s (%s) is %s by the machine; your signed VERIFIED with a note (%s) keeps it a warning") % (k, r.get("id"), ms, note[:60]))
-            else:
-                bad(rep.t("引用 %s(%s)の台帳の状態が %s(IDENTITY_CONFIRMED 未満)。rk.py refcheck check で識別子を確かめるか、使わない"
-                          "(識別子で確かめられない資料は、原典を読んで VERIFIED にするとき理由をメモに書く)",
-                          "%s (%s) has ledger state %s (below IDENTITY_CONFIRMED). Check its identifier with rk.py refcheck check, or do not "
-                          "cite it (for a work without an identifier, write the reason in the note when you mark it VERIFIED)") % (k, r.get("id"), ms))
-        if stage == "submit" and not human_ok:
-            rep.err(rep.t("原稿が引く %s は、本人が原典を確かめた署名(source VERIFIED)がない", "%s is cited but has no signed source VERIFIED by you") % k)
+        bad(rep.t("引用 %s の台帳の状態が %s(IDENTITY_CONFIRMED 未満)。rk.py refcheck check で識別子を確かめる(識別子が無ければ NCID・NDL ID などを台帳に足す)か、使わない",
+                  "%s has ledger state %s (below IDENTITY_CONFIRMED). Check its identifier with rk.py refcheck check (add an NCID, NDL ID or the like if it has none), or do not cite it") % (k, why))
+    if stage == "submit":
+        by_key = {}
+        for r in ledger.read(ledger.paths(proj)[0], ledger.REGISTER):
+            for k in (r.get("citekey"), r.get("id")):
+                if k:
+                    by_key[k] = r
+        srcs = {s.sid: s for s in subjects.sources(proj)}
+        for k in sorted(keys):
+            r = by_key.get(k)
+            s = srcs.get(r.get("id")) if r else None
+            if r and not (s and s.claimed == "VERIFIED" and sign.current(idx, "source", s.sid, s.digest, ("VERIFIED",))):
+                rep.err(rep.t("原稿が引く %s は、本人が原典を確かめた署名(source VERIFIED)がない", "%s is cited but has no signed source VERIFIED by you") % k)
 
 
-def check_numbers(proj, rep):
+def check_numbers(proj, rep, stage="draft"):
+    """A figure (a number with a unit, or a decimal) in a paragraph with no citation, no data reference (data/raw|
+    processed/... in the paragraph or its footnote) and no entry in data/numeric-claims.csv: a warning while drafting,
+    an error at submission."""
     n = 0
+    say = rep.err if stage == "submit" else rep.warn
     for p in manuscript_files(proj):
         relp = rel(proj, p)
         for ln, tok in verification.numbers_without_source(proj, read_text(p), relp):
             n += 1
             if n <= 8:
-                rep.warn(rep.t("%s:%d の数字「%s」に、出典の引用もデータファイルへの参照(data/...・data/numeric-claims.csv)もない",
+                say(rep.t("%s:%d の数字「%s」に、出典の引用もデータファイルへの参照(data/...・data/numeric-claims.csv)もない",
                                "%s:%d: the figure \"%s\" has neither a citation nor a data reference (data/..., data/numeric-claims.csv)") % (relp, ln, tok))
     if n > 8:
-        rep.warn(rep.t("出典のない数字がほかに %d 件(rk.py lint で全部)", "%d more figures without a source (rk.py lint lists them all)") % (n - 8))
+        say(rep.t("出典のない数字がほかに %d 件(rk.py lint で全部)", "%d more figures without a source (rk.py lint lists them all)") % (n - 8))
 
 
 def check_cards(proj, rep):
@@ -325,12 +322,12 @@ def check_provenance(proj, rep, stage, ci):
     for p in provenance.verify(proj, local=not ci, lang=rep.lang):
         rep.err(p)
     s = provenance.summary(proj)
-    ai_n = s["by_origin"]["ai_wrote"][0] + s["by_origin"]["ai_edited"][0]
+    ai_n = sum(s["by_origin"][o][0] for o in provenance.AI_SIDE)
     if s["paragraphs"]:
-        rep.note(rep.t("由来: 段落 %d のうち、AI が書いた %d・AI が直した %d・AI の段落を学生が直した(推定)%d・学生(推定)%d・記録なし %d",
-                       "provenance: of %d paragraphs, AI-written %d, AI-revised %d, AI paragraphs revised by you (estimated) %d, yours (estimated) %d, unrecorded %d")
-                 % (s["paragraphs"], s["by_origin"]["ai_wrote"][0], s["by_origin"]["ai_edited"][0], s["by_origin"]["student_after_ai"][0],
-                    s["by_origin"]["student"][0], s["by_origin"]["unrecorded"][0]))
+        rep.note(rep.t("由来: 段落 %d のうち、AI が書いた %d・AI が直した %d・AI の可能性(終わらなかったツール実行と重なった変化)%d・AI の段落を学生が直した(推定)%d・学生(推定)%d・記録なし %d",
+                       "provenance: of %d paragraphs, AI-written %d, AI-revised %d, possibly the AI's (overlapping an unfinished tool call) %d, AI paragraphs revised by you (estimated) %d, yours (estimated) %d, unrecorded %d")
+                 % (s["paragraphs"], s["by_origin"]["ai_wrote"][0], s["by_origin"]["ai_edited"][0], s["by_origin"]["uncertain"][0],
+                    s["by_origin"]["student_after_ai"][0], s["by_origin"]["student"][0], s["by_origin"]["unrecorded"][0]))
     pol = load_config(proj).get("ai_policy") or "unknown"
     if pol == "prohibited" and ai_n:
         (rep.err if stage in ("pr", "submit") else rep.warn)(rep.t(
@@ -495,7 +492,7 @@ def run(proj, stage="draft", ci=False, base_ref=None):
     check_sections(proj, idx, rep, stage, base_ref)
     check_config(proj, idx, rep, stage)
     check_citations(proj, idx, rep, stage)
-    check_numbers(proj, rep)
+    check_numbers(proj, rep, stage)
     check_cards(proj, rep)
     if stage == "submit":
         ps = subjects.presubmit_subject(proj)

@@ -41,7 +41,6 @@ DIGEST="$(awk -v m="$( [ "$FB_LANG" = en ] && echo en || echo ja )" '
   $0 ~ "<!-- digest-" m ":start -->" {on=1; next}
   $0 ~ "<!-- digest-" m ":end -->" {on=0}
   on {print}' "$PLUGIN_ROOT/CONSTITUTION.md" 2>/dev/null)"
-NB="python3 \"$PLUGIN_ROOT/scripts/rk/rk.py\" --project \"$PROJ\" notebook"
 
 if [ "$FB_LANG" = en ]; then
 C="[ryukoku-writing - unofficial; not a Ryukoku University tool. The university's, faculty's and instructor's instructions take precedence]
@@ -55,8 +54,8 @@ How this project works:
 - Manuscript writes follow the course AI policy (allowed: write; limited/unknown: each write asks; prohibited: no writing). Write with Write/Edit only, from confirmed claim cards, ledger sources and saved data only (draft-writer; declare them with rk.py provenance materials). Every AI write is recorded as provenance per paragraph and checked mechanically; show the student the result. Add no claim, figure or source beyond the materials.
 - Verify rigorously (claim-verification / claim-verifier): severity, evidence, suggested revisions, and never swap the student's claim. No excerpt means 'unchecked'; no search means 'not searched'.
 - You never write research/questions.md, thinking/, .ryukoku/ or the ledgers' human columns. Only VERIFIED and the final pre-submission confirmation are passphrase signatures; other decisions are one button on the evidence notebook. Never ask for the passphrase and never let it be typed into the chat.
-- To let the student decide, start the evidence notebook with run_in_background: $NB
-  then give the student the URL it prints. Terminal alternatives: ./rk confirm, ./rk verify, ./rk signoff, ./rk changes (the student runs them)."
+- To let the student decide, ask them to run ./rk notebook in their own terminal (project: $PROJ). The page's key is printed only on that terminal, so you do not start it and you never ask for its URL.
+  Terminal alternatives: ./rk confirm, ./rk verify, ./rk signoff, ./rk changes (the student runs them)."
 else
 C="[ryukoku-writing 非公式。龍谷大学の公式の道具ではない。大学・学部・担当教員の指示が常に優先する]
 学生への講評・説明・問いは日本語で書く(feedback_lang: ja)。原稿の言語: $LANG_M。
@@ -69,7 +68,7 @@ $DIGEST
 - 原稿への書き込みは科目の AI 利用条件に従う(allowed は書いてよい、limited・unknown は書く前に確認が出る、prohibited は書かない)。書くときは Write・Edit で、確認済みの主張カード・台帳の文献・保存したデータだけを材料にする(draft-writer。材料は rk.py provenance materials で記録)。AI の書き込みは段落ごとに由来として記録され、直後に機械の照合が回るので、結果を学生に示す。材料にない主張・数字・文献は足さない。
 - 検証は厳密に(claim-verification・claim-verifier): 重大度・根拠・修正案。学生の主張をすり替えない。抜粋がなければ「未照合」、検索していなければ「未調査」。
 - AI は research/questions.md・thinking/・.ryukoku/・台帳の人間の列に書かない。合言葉の署名は VERIFIED と提出前の最終確認だけで、ほかの判断は証拠ノートのボタン一つ。合言葉を尋ねない。チャットに入れさせない。
-- 学生に判断してもらうときは、証拠ノートを run_in_background で起動し、表示される URL を伝える: $NB
+- 学生に判断してもらうときは、学生に自分の端末で ./rk notebook を実行してもらう(プロジェクト: $PROJ)。画面の鍵はその端末にだけ表示されるので、AI は起動しない。URL も尋ねない。
   端末で決めるなら学生が ./rk confirm・./rk verify・./rk signoff・./rk changes を実行する。"
 fi
 

@@ -41,8 +41,10 @@ FACTUAL = ("によれば", "調査", "統計", "データ", "研究", "報告", 
            "according to", "survey", "data", "study", "studies", "report", "rate", "percent", "share")
 OPINION = ("と考える", "と考えられる", "と思われる", "だろう", "ではないか", "かもしれない", "と主張する", "と論じる", "本稿は",
            "筆者は", "と言える", "といえる", "I argue", "we argue", "this paper", "this essay", "I suggest", "may ", "might")
+# A figure: a number with a unit of quantity, or a decimal. Not figures: years (2020年, 1990年代), section, chapter,
+# article and version numbers (3.2 節, 第 2 章, v1.2, 2.0.0), page ranges, numbers inside URLs and code.
 NUM = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?\s*(?:%|％|パーセント|割|倍|人|名|件|円|万|億|兆|社|校|時間|点|ドル|percent|million|billion)"
-                 r"|(?<![\w.])\d+\.\d+(?![\w.])")
+                 r"|(?<![\w.第§])(?<!version )(?<!ver\. )(?<![vV])\d+\.\d+(?![\w.]|\s*(?:節|章|項|条|版|section|chapter))")
 DATAREF = re.compile(r"(?<![\w/])data/(?:raw|processed)/[\w./-]+")
 FOOTREF = re.compile(r"\[\^([^\]]+)\](?!:)")
 
@@ -121,6 +123,7 @@ def numbers_without_source(proj, text, relp=""):
         if P.FOOTDEF.match(b["text"].split("\n")[0]) or b["text"].lstrip().startswith("|") or b["text"].lstrip().startswith("$$"):
             continue
         body = re.sub(r"\$[^$]*\$", "", re.sub(r"`[^`]*`", "", b["text"]))
+        body = re.sub(r"https?://\S+|\]\([^)]*\)", " ", body)
         body = re.sub(r"\[@[^\]]*\]|@[A-Za-z0-9_:.-]+", "", body)
         toks = [m.group(0).strip() for m in NUM.finditer(body)]
         if not toks or has_source(b["text"], notes):

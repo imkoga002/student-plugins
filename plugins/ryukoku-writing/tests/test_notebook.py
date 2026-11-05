@@ -1,4 +1,5 @@
-"""The evidence notebook (screen): an item can be decided only after its content was displayed (view token bound to
+"""The evidence notebook (screen): the student starts it at their terminal, which alone shows the page's key; every API
+request needs that key; an item can be decided only after its content was displayed (view token bound to
 its digest); most decisions are recorded with one button and no passphrase; VERIFIED and the final confirmation
 need the passphrase, and one entry signs several of them, each with its own digest; there is no accept-all
 request; the server runs only from the installed plugin. A headless-browser test (Playwright) runs when node and
@@ -20,26 +21,44 @@ HAVE_PW = shutil.which("node") is not None and subprocess.run(["node", "-e", "re
 
 
 class Server(object):
+    """./rk notebook as the student starts it: on a terminal (a pseudo-terminal here), where the URL with the page's
+    key (#k=...) is printed. Requests carry the key in X-RK-Session unless asked not to."""
+
     def __init__(self, env, script=RKPY):
-        self.p = subprocess.Popen([sys.executable, "-B", script, "--project", env.proj, "notebook", "--port", "0"],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env.env(), cwd=env.proj)
-        line, m = "", None
-        for _ in range(8):  # the running code's location and version come first
-            ln = self.p.stdout.readline()
-            if not ln:
+        import pty
+        import select
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.chdir(env.proj)
+            os.execve(sys.executable, [sys.executable, "-B", script, "--project", env.proj, "notebook", "--port", "0"], env.env())
+        self.pid, self.fd = pid, fd
+        buf, m, t0 = b"", None, time.time()
+        while time.time() - t0 < 60:
+            r, _, _ = select.select([fd], [], [], 0.2)
+            if not r:
+                continue
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:
                 break
-            line += ln
-            m = re.search(r"http://127\.0\.0\.1:(\d+)/", ln)
+            if not chunk:
+                break
+            buf += chunk
+            m = re.search(rb"http://127\.0\.0\.1:(\d+)/#k=([A-Za-z0-9_-]+)", buf)
             if m:
                 break
+        self.output = buf.decode("utf-8", "replace")
         if not m:
-            self.p.kill()
-            raise RuntimeError(line + self.p.stderr.read())
+            self.close()
+            raise RuntimeError(self.output)
         self.port = int(m.group(1))
+        self.key = m.group(2).decode()
         self.url = "http://127.0.0.1:%d" % self.port
 
-    def req(self, path, body=None, headers=None, host=None):
+    def req(self, path, body=None, headers=None, host=None, key=True):
         h = {"Host": host or "127.0.0.1:%d" % self.port}
+        if key:
+            h["X-RK-Session"] = self.key
         data = None
         if body is not None:
             data = json.dumps(body).encode("utf-8")
@@ -52,14 +71,20 @@ class Server(object):
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read().decode("utf-8") or "{}")
 
+    def page(self):
+        return urllib.request.urlopen(urllib.request.Request(self.url + "/", headers={"Host": "127.0.0.1:%d" % self.port})).read().decode("utf-8")
+
     def close(self):
-        self.p.terminate()
+        import signal
         try:
-            self.p.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            self.p.kill()
-        self.p.stdout.close()
-        self.p.stderr.close()
+            os.kill(self.pid, signal.SIGTERM)
+            os.waitpid(self.pid, 0)
+        except OSError:
+            pass
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
 
 
 class Notebook(unittest.TestCase):
@@ -142,6 +167,21 @@ class Notebook(unittest.TestCase):
         r = self.E.rk("check")
         self.assertEqual(r.returncode, 0, r.stdout)
 
+    def test_the_page_key_is_required_and_never_served(self):
+        # without the key that only the student's terminal showed, nothing is readable or recordable (an AI's curl, a
+        # script reading the view token)
+        for path in ("/api/state", "/api/list?tab=cards", "/api/view?kind=config&id=course-policy"):
+            self.assertEqual(self.S.req(path, key=False)[0], 403, path)
+        v = self.view("config", "course-policy")
+        code, r = self.S.req("/api/sign", {"items": [{"kind": "config", "id": "course-policy", "decision": "confirmed", "token": v["token"]}]}, key=False)
+        self.assertEqual(code, 403, r)
+        self.assertEqual(self.S.req("/api/sign", {"items": []}, headers={"X-RK-Session": "0" * 43})[0], 403)
+        # the key is in no response and not on stdout-like output of the API
+        blobs = [self.S.page()] + [json.dumps(self.S.req(p)[1]) for p in ("/api/state", "/api/list?tab=submit", "/api/list?tab=research")]
+        blobs.append(json.dumps(v))
+        self.assertFalse(any(self.S.key in b for b in blobs))
+        self.assertNotIn(self.S.key, self.E.read(".ryukoku", "signoffs.jsonl"))
+
     def test_wrong_passphrases_lock_signing(self):
         v = self.view("source", "S001")
         item = [{"kind": "source", "id": "S001", "decision": "VERIFIED", "token": v["token"]}]
@@ -152,7 +192,7 @@ class Notebook(unittest.TestCase):
     def test_no_accept_all_endpoint_and_page_has_no_such_button(self):
         for path in ("/api/accept-all", "/api/sign-all", "/api/apply"):
             self.assertEqual(self.S.req(path, {"x": 1})[0], 404)
-        html = urllib.request.urlopen(urllib.request.Request(self.S.url + "/", headers={"Host": "127.0.0.1:%d" % self.S.port})).read().decode("utf-8")
+        html = self.S.page()
         self.assertNotRegex(html, r"全部(を)?採用|accept all|select all|すべて選択")
         self.assertIn("全部をまとめて採用するボタンはない", html)
 
@@ -228,7 +268,7 @@ class Browser(unittest.TestCase):
             S = Server(E)
             try:
                 js = os.path.join(os.path.dirname(os.path.abspath(__file__)), "js", "notebook.test.js")
-                r = subprocess.run(["node", js, S.url, PASS], capture_output=True, text=True, timeout=180)
+                r = subprocess.run(["node", js, S.url + "/#k=" + S.key, PASS], capture_output=True, text=True, timeout=180)
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                 self.assertIn("要因 A、要因 B。", E.read("manuscript", "main.md"))
                 recs = [json.loads(l) for l in E.read(".ryukoku", "signoffs.jsonl").splitlines() if l.strip()]

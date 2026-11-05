@@ -151,8 +151,12 @@ const DEC = {VERIFIED:["VERIFIED(原典で確かめた)","VERIFIED (checked in t
 const D = d => (DEC[d] ? DEC[d][EN ? 1 : 0] : d);
 let basket = [];
 function status(msg, bad){ const s = $("#status"); s.textContent = msg || ""; s.className = bad ? "bad" : ""; }
+// the session key arrives only as the #k=... fragment of the URL ./rk notebook printed on the student's terminal
+let SESSION = "";
+try { const m = /[#&]k=([A-Za-z0-9_-]+)/.exec(location.hash || ""); if (m) { SESSION = m[1]; sessionStorage.setItem("rk-session", SESSION); history.replaceState(null, "", location.pathname); } else { SESSION = sessionStorage.getItem("rk-session") || ""; } } catch (e) {}
 async function api(path, opts){
   const o = Object.assign({headers:{}}, opts || {});
+  o.headers["X-RK-Session"] = SESSION;
   if (o.body !== undefined){ o.method = "POST"; o.headers["Content-Type"] = "application/json"; o.headers["X-RK-Request"] = "1"; o.body = JSON.stringify(o.body); }
   const r = await fetch(path, o); let j = {}; try { j = await r.json(); } catch(e) {}
   if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));

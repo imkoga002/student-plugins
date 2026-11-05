@@ -76,8 +76,14 @@ class Store:
         rec.update(kw)
         p = os.path.join(os.path.dirname(self.path), "annotations-log.jsonl")
         os.makedirs(os.path.dirname(p), exist_ok=True)
+        line = json.dumps(rec, ensure_ascii=False, sort_keys=True)
         with open(p, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
+            f.write(line + "\n")
+        try:
+            from rklib.common import note_written
+            note_written(os.path.dirname(os.path.dirname(os.path.abspath(self.path))), os.path.join("review", "annotations-log.jsonl"), [line])
+        except ImportError:
+            pass
 
     def _find(self, data, aid):
         for a in data["items"]:

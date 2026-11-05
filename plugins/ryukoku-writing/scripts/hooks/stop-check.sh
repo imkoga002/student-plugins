@@ -27,6 +27,6 @@ if [ "${MW:-0}" -gt 0 ] 2>/dev/null && [ "${VR:-0}" = 0 ]; then
   exit 0
 fi
 if [ "${PR:-0}" -gt 0 ] 2>/dev/null; then
-  printf '{"decision":"block","reason":"%s"}\n' "$(t "このターンで提案ファイルを作った。終える前に、学生に一、二文で伝える: 証拠ノート(画面。AI が起動してよい)の「提案」で一か所ずつ差分を見て、採用・不採用のボタンで決める(合言葉は要らない。端末なら './rk apply')。採用した変更は由来の記録に残る。すでに伝えていれば、その旨を一行で述べて終えてよい。" "You created proposal files this turn. Before finishing, tell the student in one or two sentences: in the evidence notebook (you may start it) they look at each diff under 'Proposals' and accept or reject it with a button (no passphrase; or './rk apply' in a terminal). Accepted changes are recorded as provenance. If you already said so, say that in one line and finish." | json_escape)"
+  printf '{"decision":"block","reason":"%s"}\n' "$(t "このターンで提案ファイルを作った。終える前に、学生に一、二文で伝える: 証拠ノート(学生が自分の端末で ./rk notebook を実行して開く画面)の「提案」で一か所ずつ差分を見て、採用・不採用のボタンで決める(合言葉は要らない。端末なら './rk apply')。採用した変更は由来の記録に残る。すでに伝えていれば、その旨を一行で述べて終えてよい。" "You created proposal files this turn. Before finishing, tell the student in one or two sentences: in the evidence notebook (the student opens it with ./rk notebook in their terminal) they look at each diff under 'Proposals' and accept or reject it with a button (no passphrase; or './rk apply' in a terminal). Accepted changes are recorded as provenance. If you already said so, say that in one line and finish." | json_escape)"
 fi
 exit 0

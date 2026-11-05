@@ -119,11 +119,13 @@ class PreToolUse(unittest.TestCase):
             with self.subTest(c=c):
                 self.assertEqual(self.d("Bash", {"command": c}), "deny")
 
-    def test_notebook_only_from_plugin_root(self):
+    def test_notebook_is_the_students_to_start(self):
+        # v2: the page's key is shown only on the student's terminal, so the AI does not start the notebook at all
         from helpers import PLUGIN
         ok = 'python3 "%s/scripts/rk/rk.py" --project "%s" notebook' % (PLUGIN, self.P)
         r = self.E.pre("Bash", {"command": ok, "run_in_background": True})
-        self.assertEqual(decision(r), "-")
+        self.assertEqual(decision(r), "deny")
+        self.assertIn("./rk notebook", reason(r))
         self.assertEqual(self.d("Bash", {"command": "python3 /tmp/elsewhere/scripts/rk/rk.py notebook --project ."}), "deny")
 
     def test_tty_emulation_detached_and_msguard(self):
@@ -431,8 +433,8 @@ class Hooks(unittest.TestCase):
             txt = reason(r)
             self.assertIn("Write all feedback", txt)
             self.assertIn("Working constitution, key points", txt)  # CONSTITUTION.md digest (decision 11)
-            self.assertIn('--project "%s" notebook' % E.proj, txt)
-            self.assertIn("scripts/rk/rk.py", txt)
+            self.assertIn("./rk notebook", txt)
+            self.assertIn(E.proj, txt)
             self.assertIn("ryukoku-writing", txt)
             self.assertIn('"model": "claude-test-model"', E.read(".ryukoku", "ai-use-log.jsonl"))
             with open(os.path.join(E.state, "plugin-root")) as f:

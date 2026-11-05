@@ -16,11 +16,10 @@ sys.path.insert(0, HERE)
 
 from rklib import (argmap, check, claimcards, criticmarkup, datacheck, disclosure, docx_comments, export, ledger,  # noqa: E402
                    overlap, proposals, provenance, refcheck, search, searchlog, sign, style, subjects, trust, verification)
-from rklib.common import (RkError, append_jsonl, feedback_lang, find_project, is_inside, load_config,  # noqa: E402
+from rklib.common import (HUMAN_COMMANDS, RkError, append_jsonl, feedback_lang, find_project, is_inside, load_config,  # noqa: E402
                           manuscript_files, now_iso, read_text, safe_rel, sha256_bytes, tr)
 
-HUMAN = ("setup", "confirm", "apply", "verify", "style", "resolve", "signoff", "disclose", "changes", "optout", "import-docx",
-         "sign", "trust", "update-tools")
+HUMAN = HUMAN_COMMANDS  # scripts/rk/human-commands.txt
 VERSION = "2.0.0"
 
 
@@ -46,7 +45,7 @@ HELP_JA = """rk - ryukoku-writing の道具(非公式。大学・教員の指示
 最初に一度だけ(自分の端末で):
   ./rk setup            科目の AI 利用条件、オプトアウトの確認、合言葉(今でも後でも)、Git の選択
 
-判断は画面で(おすすめ): Claude に「証拠ノートを開いて」と頼むか、./rk notebook
+判断は画面で(おすすめ): 自分の端末で ./rk notebook を実行し、その端末に出た鍵つきの URL を開く
   項目を一つずつ表示して確かめ、ボタンで記録する。合言葉が要るのは VERIFIED と提出前の最終確認だけ。
 端末で一件ずつ決めることもできる:
   ./rk confirm          主張カードを読み、自分の主張なら確認する(キー一つ)
@@ -67,7 +66,7 @@ HELP_EN = """rk - ryukoku-writing tool (unofficial; your university and instruct
 Once, in your own terminal:
   ./rk setup            course AI policy, opt-out check, passphrase (now or later), Git
 
-Decide on the screen (recommended): ask Claude to "open the evidence notebook", or ./rk notebook.
+Decide on the screen (recommended): run ./rk notebook in your own terminal and open the URL (with its key) it prints there.
   Open each item, check it and record it with a button. Only VERIFIED and the final pre-submission confirmation
   need the passphrase.
 Or item by item in the terminal:
@@ -740,7 +739,7 @@ def main(argv=None):
         if a.cmd == "setup":
             from rklib import setup
             return setup.run(proj)
-        if a.cmd in HUMAN and a.cmd != "update-tools":
+        if a.cmd in HUMAN and a.cmd not in ("update-tools", "notebook"):
             from rklib import human
             return human.run_human(a.cmd, proj, a)
         return DISPATCH[a.cmd](proj, a)

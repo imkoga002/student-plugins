@@ -31,7 +31,7 @@ import os
 import sys
 
 from . import ed25519 as ED
-from .common import FileLock, RkError, canonical, now_iso, read_jsonl, sha256_bytes
+from .common import FileLock, RkError, canonical, note_written, now_iso, read_jsonl, sha256_bytes
 
 MIN_PASSPHRASE = 10
 DEFAULT_ITER = 600000
@@ -300,7 +300,9 @@ def append_signoffs(proj, recs):
     with FileLock(p + ".lock"):
         with open(p, "a", encoding="utf-8", newline="") as f:
             for r in recs:
-                f.write(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n")
+                line = json.dumps(r, ensure_ascii=False, sort_keys=True)
+                f.write(line + "\n")
+                note_written(proj, SIGNOFFS_REL, [line])
 
 
 def valid_index(proj, trusted):

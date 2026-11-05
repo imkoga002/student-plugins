@@ -10,22 +10,22 @@
 
 ### 2.1 `bash tests/run.sh`
 
-最後のコードの変更の後に一度、通しで回した(公開しない語の一覧は手元に無いので、その試験は飛んだ。実通信の試験も飛ばした)。実行の途中と後に変えたのは README・README.en・この文書の記述だけ(コードではない)で、その後に `claude plugin validate --strict` を回し直した。実行の後、`__pycache__` は残っていない:
+敵対的な検証の指摘(§2.5)を直した後、最後のコードの変更と MANIFEST の再生成の後に一度、通しで回した(公開しない語の一覧は手元に無いので、その試験は飛んだ。実通信の試験も飛ばした)。実行の後に変えたのはこの文書の記述だけ(コードではない)で、その後に `claude plugin validate --strict` を回し直した。実行の後、`__pycache__` は残っていない:
 
 ```
 $ HOME=<一時フォルダ> TMPDIR=<一時フォルダ> bash tests/run.sh
 test_no_private_terms_anywhere (test_init_export.Init.test_no_private_terms_anywhere) ... skipped 'no private term list (set RK_PRIVATE_TERMS_FILE or create tests/private-terms.txt)'
 test_live_identity_mismatch_not_found_and_retraction (test_research.Verifier.test_live_identity_mismatch_not_found_and_retraction) ... skipped 'set RK_NET_TESTS=1 for live API tests'
 ----------------------------------------------------------------------
-Ran 220 tests in 543.428s
+Ran 231 tests in 600.715s
 
 OK (skipped=2)
 ALL OK
 
-real	9m4.155s
+real	10m1.422s
 ```
 
-内訳(試験の数): test_hooks 34、test_detect 13、test_sign 18、test_proposals 17、test_research 15、test_init_export 14、test_notebook 10(Playwright を含む)、test_round3 44、test_round4 19、test_round5 15、test_round6 7、test_v2 14。
+内訳(試験の数): test_hooks 34、test_detect 13、test_sign 18、test_proposals 17、test_research 15、test_init_export 14、test_notebook 11(Playwright を含む)、test_round3 44、test_round4 19、test_round5 15、test_round6 7、test_v2 24。
 
 v1 の試験のうち、v2 で意味が変わったものは書き換えた。原稿の検知を「戻す」と判断する試験は、v2 で原稿の検知そのものがなくなったので、守られたファイルの検知を判断する試験に置き換えた:
 - 「原稿に書けない」試験は、科目の条件ごとの期待に: allowed は allow と由来の記録、limited と unknown は ask、prohibited は deny、シェルからはどの条件でも deny(`test_hooks.Policy`、`test_hooks.PreToolUse` のパスの正規化の試験は「unknown で ask、理由が原稿のもの」を確かめる形に)。
@@ -59,13 +59,39 @@ $ claude plugin validate --strict .                           # リポジトリ�
 | live-p1 | prohibited の科目で、同じ依頼 | モデルが送信前の文脈(禁止の科目)を受けて、Edit を呼ばずに断り、できること(検証・形式の確認・考えの整理)を示した。原稿は不変、由来の記録は 0 行(1 ターン、$0.0042)。**この一回ではフックの deny 自体は観測できなかった**(モデルが手前で断った) |
 | live-p2 | prohibited の科目で、フックの動作確認として Edit を一度だけ呼ばせる | Edit が permission_denials に入り、フックの理由文(「この科目は … 『AI 利用禁止(ai_policy: prohibited)』と記録されているので、AI は原稿を書かない・直さない …」)がそのまま返った。原稿は不変(3 ターン、$0.0057) |
 
-費用の合計 **約 $0.017**(上限 $1)。実行の後、本物のホームに `~/.ryukoku-writing` はできていない。
+指摘を直した後に、同じ準備で三回撃ち直した:
+
+| # | 確かめたこと | 結果 |
+|---|---|---|
+| fix-a | allowed の科目で、原稿への Edit(live-a と同じ依頼) | Edit が通り、`.ryukoku/provenance.jsonl` に AI の記録が 1 行($0.0065) |
+| fix-p | prohibited の科目で、Edit を一度だけ呼ばせる | Edit が permission_denials に入り、禁止の科目の理由文が返った。原稿は不変($0.0059) |
+| fix-p2 | prohibited の科目で、指摘 F1 の形のシェルの書き込み `cd m?nuscript && echo 試験 >> main.md` を一度だけ呼ばせる | Bash が permission_denials に入った。原稿は不変($0.0050) |
+
+費用の合計 **約 $0.034**(修正前 約 $0.017、修正後 約 $0.017。上限 $1)。実行の後、本物のホームに `~/.ryukoku-writing` はできていない。
 
 ### 2.4 eval
 
 `evals/` を v2 に合わせて作り直した(11 件。各件に機械的な採点器(regex・tool_used・file_exists)があり、llm の採点器は補助): allowed-draft-records-provenance、prohibited-no-write、no-unlisted-source、no-fabricated-sources、verification-flags-swap、verification-flags-unsupported、search-log-recorded、verified-is-human、pii-stop、card-confirm-is-student、no-rq-for-student。v1 の、v2 の考えと逆になった 6 件(修正例を出さない・書き直しを断る・表記は必ず提案・代筆を断る・書き換えは提案にできない・まず学生の考え)は消した。
 
 **eval は回していない**(`claude plugin eval` を実行していない)。各 case の scaffold は、一時フォルダで単独に実行して全部が終了コード 0 で終わり、verification-flags-swap の scaffold で作ったプロジェクトに `rk.py verification scaffold` をかけると、期待する「致命」の候補(強める語・限定の脱落)が出ることまでは確かめた。採点器の正規表現が実際の応答に当たるか、llm の採点器の基準が妥当かは未検証。
+
+### 2.5 v2 の敵対的な検証の指摘と対応
+
+v2 の後の敵対的な検証で見つかった欠陥と、直したこと。指摘の再現の手順は、そのまま回帰の試験(`tests/test_v2.Hardening` と、`test_detect`・`test_round3`・`test_sign`・`test_notebook` の書き換え)にした。設計の説明は DESIGN.md §3.12。
+
+| 指摘 | 対応 | 試験 |
+|---|---|---|
+| F1 重大: `man\uscript`・`cd m?nuscript`・`cd .r?ukoku`・`cd .[r]yukoku`・`cd th?nking`・`cd res?arch … q\uestions.md` のシェルの書き込みが確認なしで通る。由来の記録への、連鎖を保った偽の行の追記が見つからない | `cd` の glob を bash と同じに展開して追い、追えない `cd` の後の相対の書き込み先は「不明」(確認、`prohibited` と記録のファイル名なら deny)。リダイレクトと書き込みのコマンドの書き込み先を、解析の後に `rklib/paths.py`(`lib.sh` と同じ分類)で分類し、守られた場所は deny。正規表現は `\`→`/` の形とエスケープを外した形の両方を見る(早期警告)。Plugin のコードが書いた行のハッシュを外に控え、AI の窓の中に現れた控えに無い行を検知にする(フックが自分の行を書く前に比べる) | `test_shell_writes_to_protected_paths_are_denied_under_every_policy`(指摘の 6 件を含む 12 件 × 2 つの条件)、`test_path_classes_agree_with_the_hook`、`test_forged_provenance_lines_are_detected` |
+| F2: 最後の部分がシンボリックリンクのファイルで Write が通る | 最後の部分のリンクをたどって判定(`phys_file`) | `test_symlinked_file_and_other_field_names` |
+| F3: MCP の道具の `filename`・`destination` などの欄が見られない | `tool_input` のパスに見えるすべての値を判定(本文の欄は除く) | 同上 |
+| S1: 人間専用のコマンドの一覧が三か所で食い違う。`--project P confirm` | `scripts/rk/human-commands.txt` を一つの出どころに。オプションの後のサブコマンドも照合 | `test_one_list_of_human_only_commands` |
+| S2: 証拠ノートの API に鍵が無い。ループバックの別の書き方が通る | 起動ごとの鍵を、学生の端末にだけ URL の断片で出し、全 API で要求。端末の無いところでは起動しない(学生が `./rk notebook` で開く)。ループバックの書き方を広げて deny | `test_notebook.Notebook.test_the_page_key_is_required_and_never_served`、`test_round3.NotebookCommand.test_advised_commands_really_run`、`test_loopback_api_calls_are_denied_in_any_spelling`、Playwright |
+| S3: `[@{key}]`・`nocite` を見ない。`references.json` が禁止の科目でも書ける | `rklib/citations.py`。提出の段階の検査と書き出しで、出る参考文献すべてに台帳と IDENTITY_CONFIRMED を要求(メモで注意に下げる逃げ道は外した)。`references.json` は `prohibited` で deny | `test_rendered_bibliography_entries_must_be_confirmed` |
+| S4: 数字の検査が提出でも注意だけ | 提出の段階でエラー。年・章節・版・頁の範囲は数えない | `test_figures_without_a_source_fail_at_submission_but_not_years_or_sections` |
+| S5・S6: 設定の読み方がフックと道具で違う。重複・大文字・欠落・読めない設定が unknown になる | どちらも最初の行・`key :` を同じに読む。重複・四つ以外の値・欠落・読めないときは原稿への書き込みを deny、`rk check` はエラー | `test_settings_that_cannot_be_trusted_close_manuscript_writes` |
+| S7: 12 分を超えるツール実行の間の変化が学生のものになる | 窓は PostToolUse まで開いたまま(上限 6 時間)。上限で捨てた窓の後の変化は `uncertain` として AI の側に数える | `test_changes_after_an_unfinished_tool_call_count_as_the_ais` |
+
+直せなかったこと・直さなかったこと: 学生が許可したプログラムは、鍵の読み取り・Plugin のコードを使った記録・記録の作り直しなど何でもできる(限界として README・DESIGN に書いた)。地の文の「著者(年)」は機械で照合できない。解析しない形のシェルのコマンド(コマンド置換など)は、学生が許可すれば通る。
 
 ## 3. 要件ごとの充足度
 
@@ -90,7 +116,7 @@ $ claude plugin validate --strict .                           # リポジトリ�
 
 ## 4. 未検証の点
 
-- **v2 の変更は、独立検証を受けていない。** v1 の 5 回の独立検証は v1 の仕組みに対するもので、原稿への書き込みの許可、由来、軽い確認、主張カード、検証の機械の部分には及ばない。
+- **v2 は一度の敵対的な検証を受け、見つかった欠陥(§2.5)を直したが、直した後の版は検証を受け直していない。** v1 の 5 回の独立検証は v1 の仕組みに対するもの。
 - eval を一度も回していない。モデルが draft-writer の手順(材料だけ、追加の提案は本文の外)を守るか、claim-verifier が致命の候補を正しく扱うかは、単体の試験では確かめられない。
 - 機械の照合の語の一覧(強める語・限定の語・向きの語・事実の語・意見の語)が、実際の学生の原稿でどれだけ当たり、どれだけ外れるか。
 - Windows(PowerShell・cmd・Git Bash)と macOS(bash 3.2・BSD の道具)の実機。GitHub Actions の上での check.yml と build.yml(worktree での再現だけ)。PDF の書き出しと Mermaid の画像化(lualatex・mmdc が無い)。CiNii Research(appid が無い)。実通信の試験(`RK_NET_TESTS=1`)は v2 では回していない。
@@ -103,8 +129,11 @@ $ claude plugin validate --strict .                           # リポジトリ�
 - **軽い確認は暗号で守られていない。** フックの拒否、AI の窓の中の検知、追記だけの検査、CI の基準ブランチとの照合で守る。学生が許したプログラムが窓の外で書いた確認は区別できない。AI のツールが動いている間に学生が画面で確認すると、その確認は検知として出る(誤検知。学生が「自分の操作」と判断する)。
 - **すり替えの検知の機械の部分は、語の一覧による候補。** 言い換えた強調・範囲の拡大・主語のすり替えは漏れる。逆に、学生の主張どおりの文でも語の選び方で候補が出る。最後は claim-verifier と学生の判断に任せる。
 - 段落の対応は空行で区切ったまとまりの並びの比較による。段落を分けたり合わせたりすると、削除と挿入として記録される。
-- 引用の検査は、台帳の `citekey` か `id` と原稿の `@key` の一致で行う。`references.json` にだけある文献は「台帳にない」になる。識別子で確かめられない資料は、原典を読んだ署名にメモを付けたときだけ注意に下がる。
-- 出典のない数字の検査は、単位つきの数と小数だけを見る(年や章の番号は見ない)。単位のない数字の主張は漏れる。
+- 引用の検査は、台帳の `citekey` か `id` と、原稿が出す参考文献(`@key`・`@{key}`・`nocite`、`@*` は `sources/references.json` のすべて)の一致で行う。`references.json` にだけある文献は「台帳にない」になる。識別子の無い資料は、識別子を足さない限り提出の段階で引けない(厳しすぎる場合がある)。地の文の「著者(年)」、`.bib` など `references.json` 以外の文献ファイルの `@*` は照合しない。
+- 出典のない数字の検査は、単位つきの数と小数だけを見る(年・章や節の番号・版の番号・頁の範囲は見ない)。単位のない数字の主張は漏れる。提出の段階ではエラーなので、引用・データの参照・`data/numeric-claims.csv` のどれかが要る。
+- 証拠ノートは、学生が端末で `./rk notebook` を実行して開く(鍵は端末にだけ出る)。v2 の最初の版の「AI が画面を起動する」流れより手間が一つ増えた。鍵は、学生が許可したプログラムなら端末の出力やブラウザの保存域から読める。
+- シェルの書き込みの判定は、`execgate` の字句解析で読める形に限る。コマンド置換・ヒアドキュメントなど解析しない形は確認になり、学生が許可すれば通る(その後は由来か検知に残る)。行き先の分からない書き込みは、`prohibited` の科目と記録のファイルの名前のときだけ deny で、それ以外は確認になる。
+- 追記の偽造の検知は、Plugin のコードが書いた行のハッシュの控え(プロジェクトの外)と比べる。学生が許可したスクリプトが Plugin のコードを呼んで書いた行は区別できない。控えはその PC にだけあるので、CI では使わない(CI は基準ブランチの続きであることだけを確かめる)。
 - `rk check` は学生の編集(推定)を記録するので、`git commit` の pre-commit で `rk check` が走ると、`.ryukoku/provenance.jsonl` に追記が残ることがある(次の commit に入る)。
 - prohibited の科目では、Bash の `python3 -c '…manuscript…'` のような原稿を名指しするインラインのコードは、読み取りでも deny になる(v1 の「書き込みの操作と原稿のパスが並ぶ形を止める」規則による)。読み取りは Read を使う。
 - v1 から残る限界(同じ利用者の権限で動くコード、許可リストのコマンドの組み合わせ、フックが止まっている間、CI の起点と指導教員の指紋の照合、合言葉の総当たり、架空の NCID が CANDIDATE になること、個人情報の検知の漏れ、datacheck の文言が日本語だけ)は v1 と同じ。README の「保証しないこと」に書いた。

@@ -75,8 +75,18 @@ if ! is_active "$PROJ"; then
   exit 0
 fi
 FB_LANG="$(cfg_get feedback_lang)"; [ -n "$FB_LANG" ] || FB_LANG="$(cfg_get manuscript_lang)"
-POLICY="$(cfg_get ai_policy)"; [ -n "$POLICY" ] || POLICY=unknown
+POLICY="$(cfg_get ai_policy)"
 USES="$(cfg_get ai_allowed_uses | LC_ALL=C tr 'A-Z' 'a-z')"
+# the settings must be readable and say exactly one of the four policies; otherwise nothing is assumed (writes closed)
+CFG_BAD=""
+CFGF="$PROJ/.ryukoku/config.yml"
+if [ ! -f "$CFGF" ]; then CFG_BAD=missing
+elif [ ! -r "$CFGF" ]; then CFG_BAD=unreadable
+elif [ "$(cfg_count ai_policy)" != 1 ]; then CFG_BAD="ai_policy x$(cfg_count ai_policy)"
+else
+  case "$POLICY" in allowed|limited|prohibited|unknown) ;; *) CFG_BAD="ai_policy=$POLICY" ;; esac
+fi
+[ -n "$CFG_BAD" ] && POLICY=unreadable
 OUTSIDE=""
 if [ "$(phys_dir "$BASE" 2>/dev/null || printf '%s' "$BASE")" != "$(phys_dir "$PROJ" 2>/dev/null || printf '%s' "$PROJ")" ]; then
   OUTSIDE="$(t " / Claude Code がプロジェクトの外($BASE)で開かれている。プロジェクトのフォルダ($PROJ)で開き直すと、記録と検知が正しく働く。" " / Claude Code is open outside the project ($BASE). Reopen it in the project folder ($PROJ) so recording and detection work properly.")"
@@ -109,7 +119,7 @@ WHY_HUMAN="$(t "このファイルは人間の判断の記録か、それを守�
 WHY_STARTUP="$(t "シェルの起動ファイル・PATH 上のディレクトリ(~/.local/bin など)・自動起動・エディタのタスク(.vscode)・.envrc は AI が書かない。学生が次に端末を開いたり ./rk を動かしたりしたときに、確認なしでコードが動いてしまうため(検証の新規の指摘 3)。" "The AI does not write shell startup files, directories on PATH (~/.local/bin, ...), autostart entries, editor tasks (.vscode) or .envrc: they would run code without a prompt the next time the student opens a terminal or runs ./rk.")"
 
 manuscript_gate() { # Write/Edit to manuscript/: the course AI policy decides (no readable settings: closed)
-  [ -f "$PROJ/.ryukoku/config.yml" ] || deny_out "$(t "このプロジェクトの設定(.ryukoku/config.yml)が見つからないので、科目の AI 利用条件を確かめられない。原稿には書かない。学生に、設定が消えた・動いた理由を確かめてもらう(./rk check)。" "This project's settings (.ryukoku/config.yml) are missing, so the course AI policy cannot be checked; the AI does not write the manuscript. Ask the student to find out why the settings moved or vanished (./rk check).")"
+  [ -n "$CFG_BAD" ] && deny_out "$(t "このプロジェクトの設定(.ryukoku/config.yml)が見つからないか、読めないか、科目の AI 利用条件がちょうど一つの正しい値(allowed・limited・prohibited・unknown)になっていない($CFG_BAD)。条件を確かめられないので、原稿には書かない。学生に ./rk check で原因を確かめ、./rk setup で直してもらう。" "This project's settings (.ryukoku/config.yml) are missing or unreadable, or the course AI policy is not exactly one valid value (allowed, limited, prohibited, unknown) ($CFG_BAD). The policy cannot be checked, so the AI does not write the manuscript. Ask the student to look at ./rk check and fix it with ./rk setup.")"
   case "$POLICY" in
     allowed) return 0 ;;
     prohibited) deny_out "$WHY_MS_PROHIBITED" ;;
@@ -122,6 +132,7 @@ deny_class() { # CLASS -> deny with the matching explanation
   case "$1" in
     manuscript) [ "$POLICY" = prohibited ] && deny_out "$WHY_MS_PROHIBITED"; deny_out "$WHY_MS" ;;
     ryukoku|disclosure|statehome) deny_out "$WHY_HUMAN" ;;
+    statement) deny_out "$(t "開示文の下書き(disclosure/statement*.md)は Write・Edit で書く(シェルからは書かない)。" "Write the disclosure statement draft (disclosure/statement*.md) with Write/Edit, not from the shell.")" ;;
     startup) deny_out "$WHY_STARTUP" ;;
     tools|plugin) deny_out "$(t "検査・記録の道具(tools/、./rk の起動ファイル、Plugin 本体、~/.ryukoku-writing)は AI が書き換えない。守りを外すことになり、学生が合言葉を入れるコードの行き先を変えられるため。" "The checking and recording tools (tools/, the ./rk launchers, the plugin itself, ~/.ryukoku-writing) are not modified by the AI: that would remove the safeguards and could redirect the code that receives the student's passphrase.")" ;;
     runconfig) deny_out "$(t "Git と Python の設定(.git/、~/.gitconfig、~/.config/git/、site-packages、sitecustomize・usercustomize、.pth)は AI が書かない。読み取りだけのコマンド(git log、python の起動)にも別のコードを実行させる設定になりうるため。" "Git and Python configuration (.git/, ~/.gitconfig, ~/.config/git/, site-packages, sitecustomize/usercustomize, .pth) is not written by the AI: it could make even read-only commands (git log, starting python) run other code.")" ;;
@@ -143,7 +154,7 @@ policy_reason() {
 }
 policy_gate() { # USE [block] -> limited: ask when USE is not allowed; prohibited: deny when the second argument is "block"
   case "$POLICY" in
-    prohibited) [ "${2:-}" = block ] && deny_out "$(policy_reason "$1")" ;;
+    prohibited|unreadable) [ "${2:-}" = block ] && deny_out "$(policy_reason "$1")" ;;
     limited) case ",$(printf '%s' "$USES" | tr -d ' ')," in *",$1,"*) : ;; *) ask_out "$(policy_reason "$1")" ;; esac ;;
   esac
   return 0
@@ -153,7 +164,7 @@ case "$TOOL" in
   Write|Edit|MultiEdit|NotebookEdit)
     [ -n "$FP" ] || exit 0
     AFP="$(abs_of "$FP" "$BASE")"
-    PFP="$(phys_dir "${AFP%/*}" 2>/dev/null)/${AFP##*/}" || PFP="$AFP"
+    PFP="$(phys_file "$AFP")"; [ -n "$PFP" ] || PFP="$AFP"  # a symbolic link as the last component is followed
     case "$(norm_path "$AFP")" in "$PR_N"/*) deny_class plugin ;; esac
     case "$(norm_path "$PFP")" in "$PR_N"/*) deny_class plugin ;; esac
     PPROJ="$(phys_dir "$PROJ" 2>/dev/null || printf '%s' "$PROJ")"
@@ -164,6 +175,7 @@ case "$TOOL" in
     case "$C" in
       manuscript) manuscript_gate ;;
       ryukoku|tools|questions|searchlog|thinking|disclosure|annotations|ledger|raw|statehome|claude|runconfig) deny_class "$C" ;;
+      bibliography) policy_gate verify block ;;
       startup) deny_out "$WHY_STARTUP" ;;
       claims) policy_gate ideas block ;;
       verification) policy_gate review ;;
@@ -209,19 +221,29 @@ case "$TOOL" in
 
   *)
     if [ "$KIND" = other ]; then
-      # an unknown tool (an MCP server, a newer built-in) that names a path: matched like Write
-      for k in file_path path notebook_path; do
-        UFP="$(printf '%s' "$INPUT" | json_string_field "$k")"
+      # an unknown tool (an MCP server, a newer built-in): every string value that looks like a path (whatever its
+      # field is called: path, filename, destination, ...) is matched like a Write target; content-like fields are not
+      UPATHS="$(printf '%s' "$INPUT" | tool_input_paths)"
+      OLDIFS="$IFS"; IFS='
+'
+      for UFP in $UPATHS; do
+        IFS="$OLDIFS"
         [ -n "$UFP" ] || continue
         UA="$(abs_of "$UFP" "$BASE")"
-        UPP="$(phys_dir "${UA%/*}" 2>/dev/null)/${UA##*/}" || UPP="$UA"
+        UPP="$(phys_file "$UA")"; [ -n "$UPP" ] || UPP="$UA"
         case "$(norm_path "$UA")" in "$PR_N"/*) deny_class plugin ;; esac
         UC="$(path_class "$(rel_norm "$(phys_dir "$PROJ" 2>/dev/null || printf '%s' "$PROJ")" "$UPP")")"
         [ "$UC" = other ] && UC="$(path_class "$(rel_norm "$PROJ" "$UA")")"
         case "$UC" in
           manuscript|ryukoku|tools|questions|searchlog|thinking|disclosure|annotations|ledger|raw|statehome|claude|runconfig|startup) deny_class "$UC" ;;
+          bibliography) policy_gate verify block ;;
+          claims) policy_gate ideas block ;;
+          proposals) policy_gate format block ;;
         esac
+        IFS='
+'
       done
+      IFS="$OLDIFS"
       guard_pre; exit 0
     fi
     CMD="$CMD0"
@@ -232,15 +254,19 @@ case "$TOOL" in
     [ -n "$CWD" ] && CWDREL="$(rel_norm "$PROJ" "$(phys_dir "$CWD" 2>/dev/null || printf '%s' "$CWD")")"
     case "$CWDREL" in ""|/*|.) CWDREL="" ;; esac
     NC="$(norm_path "$CMD")"
-    [ -n "$CWDREL" ] && NC="cd $CWDREL/ ; $NC"
-    has() { printf '%s' "$NC" | LC_ALL=C grep -Eq -e "$1"; }
+    # the same command with shell backslash escapes removed (bash reads man\uscript as manuscript); the string checks
+    # look at both spellings. They are only the early warning: execgate's parsed check below is the authority
+    NCB="$(printf '%s' "$CMD" | LC_ALL=C sed -e 's/\\\(.\)/\1/g')"; NCB="$(norm_path "$NCB")"
+    [ -n "$CWDREL" ] && NC="cd $CWDREL/ ; $NC" && NCB="cd $CWDREL/ ; $NCB"
+    has() { printf '%s\n%s' "$NC" "$NCB" | LC_ALL=C grep -Eq -e "$1"; }
     WOPS='(^|[^a-z0-9_.-])(tee|cp|mv|dd|install|rsync|ln|truncate|rm|rmdir|touch|unlink|shred|patch|ed|ex|split|csplit)([[:space:]]|$)|sed[[:space:]]+(-[a-z]*i|--in-place)|perl[[:space:]]+-[a-z]*i|(python[0-9.]*|py|perl|ruby|node|nodejs|php|deno|bun|pwsh|powershell|osascript|bash|sh|zsh)[[:space:]]+(-[a-z]*[ec]([[:space:]]|$)|-command|--eval|-([[:space:]]|$))|awk[[:space:]]+-i|git[[:space:]]+(checkout|restore|apply|am|mv|rm|stash|reset)|(curl|wget|pandoc|iconv|unzip|tar|zip|7z)[^;|&]*([[:space:]]-o|--output|[[:space:]]-x)|of=|<<|set-content|add-content|out-file|new-item|copy-item|move-item|remove-item|rename-item|clear-content|tee-object|writealltext|appendalltext|-outfile'
     # pandoc writing its output outside manuscript/ is an export, not a manuscript write
     if has '(^|[[:space:]/;&|])pandoc[[:space:]]'; then
       POUT="$(printf '%s' "$NC" | LC_ALL=C sed -n -E 's/.*(^|[[:space:]])(-o|--output)([[:space:]]+|=)([^[:space:];|&]+).*/\4/p' | head -n 1)"
       case "/$POUT" in
         */manuscript/*) : ;;
-        *) [ -n "$POUT" ] && NC="$(printf '%s' "$NC" | LC_ALL=C sed -E 's/(^|[[:space:]])(-o|--output)([[:space:]]+|=)[^[:space:];|&]+/ /g')" ;;
+        *) [ -n "$POUT" ] && NC="$(printf '%s' "$NC" | LC_ALL=C sed -E 's/(^|[[:space:]])(-o|--output)([[:space:]]+|=)[^[:space:];|&]+/ /g')" \
+             && NCB="$(printf '%s' "$NCB" | LC_ALL=C sed -E 's/(^|[[:space:]])(-o|--output)([[:space:]]+|=)[^[:space:];|&]+/ /g')" ;;
       esac
     fi
     touches() { # SEG_RE [NAME_RE]: NAME_RE (default SEG_RE) is the plain name used after ">" and "cd"
@@ -253,8 +279,10 @@ case "$TOOL" in
     }
     SEG_MS='(^|[^a-z0-9_-])manuscript(/|[[:space:]"'"'"';|&)]|$)'
     RKCMD='(^|[^a-z0-9_.-])(rk|rk\.cmd|rk\.ps1|rk\.py)[[:space:]]+'
-    NBCMD="python3 \"$PLUGIN_ROOT/scripts/rk/rk.py\" --project \"$PROJ\" notebook"
-    NB_WHY="$(t "証拠ノートの画面は、インストールされた Plugin のコードから起動する(学生が合言葉を入れる画面なので、ほかの場所のコードに出させない)。起動するときは run_in_background で: $NBCMD" "Start the evidence notebook from the installed plugin only (the student types the passphrase there, so no other code may serve it). Start it with run_in_background: $NBCMD")"
+    RKOPTS='(-[^[:space:]]*([[:space:]]+[^-[:space:]][^[:space:]]*)?[[:space:]]+)*'
+    NB_WHY="$(t "証拠ノートの画面は、学生が自分の端末で ./rk notebook を実行して開く(画面を使うための鍵は、その端末にだけ表示される。AI が起動すると、学生の確認を装える経路になるため)。学生にそう伝える。" "The evidence notebook is opened by the student at their own terminal with ./rk notebook (the key for the page is shown only on that terminal; an AI-started page would be a way to pose as the student's confirmation). Tell the student so.")"
+    HUMAN_RE="$(LC_ALL=C grep -v '^#' "$PLUGIN_ROOT/scripts/rk/human-commands.txt" 2>/dev/null | LC_ALL=C tr -s ' \n' '||' | LC_ALL=C sed -e 's/^|//' -e 's/|$//')"
+    [ -n "$HUMAN_RE" ] || HUMAN_RE='setup|confirm|apply|verify|style|resolve|signoff|disclose|changes|optout|import-docx|sign|trust|update-tools|notebook|unattributed|review'
     # what code would this command run? (shlex parse: quotes, argument order and cd do not matter)
     SCAN=""
     if have_python; then
@@ -267,17 +295,33 @@ case "$TOOL" in
     if printf '%s\n' "$SCAN" | LC_ALL=C grep -q '^claude_deny'; then
       deny_out "$(t "Claude Code の Plugin・設定・MCP の操作(claude plugin / config / mcp など)は AI が行わない。Plugin の無効化や削除、フックの停止で、このプロジェクトの守りが全部止まるため。必要なら学生が自分の端末で行う。" "Plugin, settings and MCP operations of Claude Code (claude plugin / config / mcp ...) are not run by the AI: disabling or removing the plugin, or turning hooks off, stops every safeguard of this project. The student does it in their own terminal if needed.")"
     fi
-    if printf '%s\n' "$SCAN" | LC_ALL=C grep -q '^human'; then HUMAN_HIT=1; else HUMAN_HIT=0; fi
-    # without python, the string form: the notebook only from the plugin's rk.py
-    if [ -z "$RK_PY" ] && has "${RKCMD}[\"']?notebook"; then
-      case "$NC" in
-        *"$PR_N/scripts/rk/rk.py"*notebook*) : ;;
-        *rk*notebook*) deny_out "$NB_WHY" ;;
+    # writes that reach a protected place, decided on the PARSED command (quotes, backslashes, globs and cd resolved)
+    PWS="$(printf '%s\n' "$SCAN" | LC_ALL=C awk '$1 == "protected_write" { print $2 }' | LC_ALL=C sort -u | tr '\n' ' ')"
+    for PW in $PWS; do  # the protected classes first: any one of them denies the whole command
+      case "$PW" in
+        manuscript) deny_class manuscript ;;
+        unknown) deny_out "$(t "書き込み先の名前が、記録・設定・原稿のファイル名と同じなのに、場所を特定できない(cd の行き先が変数・解決できない glob など)。守られた場所への書き込みの可能性があるので止めた。パスをそのまま書くか、Write・Edit を使う。" "The write target has the name of a record, setting or manuscript file but its location cannot be determined (a cd to a variable or an unresolvable glob). It may reach a protected place, so it is blocked. Spell the path out, or use Write/Edit.")" ;;
+        ryukoku|tools|questions|searchlog|thinking|disclosure|statement|annotations|ledger|raw|statehome|claude|runconfig|startup) deny_class "$PW" ;;
       esac
+    done
+    for PW in $PWS; do
+      case "$PW" in
+        claims) policy_gate ideas block ;;
+        bibliography) policy_gate verify block ;;
+        proposals) policy_gate format block ;;
+        ci) ask_out "$(t "CI や Git フックの変更は検査を弱めうる。変更点を学生が確かめる。" "Changing CI or Git hooks may weaken the checks. The student should review it.")" ;;
+      esac
+    done
+    if printf '%s\n' "$SCAN" | LC_ALL=C grep -q '^unknown_target' && [ "$POLICY" = prohibited -o "$POLICY" = unreadable ]; then
+      deny_out "$(t "書き込み先を特定できないシェルの書き込み(変数、解決できない glob、行き先の分からない cd の後の相対パス)。この科目は AI 利用禁止と記録されているので止めた。" "A shell write whose target cannot be determined (a variable, an unresolvable glob, a relative path after a cd that cannot be followed). The course is recorded as AI-prohibited, so it is blocked.")"
     fi
-    # human-only commands (any launcher or path)
-    if [ "${HUMAN_HIT:-0}" = 1 ] || has "${RKCMD}[\"']?(setup|apply|verify|style|resolve|signoff|disclose|changes|optout|import-docx|sign|trust|update-tools|confirm|unattributed|review)[\"']?([[:space:]]|$)"; then
-      deny_out "$(t "'./rk setup・confirm・apply・verify・style・resolve・signoff・disclose・changes・optout・import-docx・sign・trust・update-tools' は人間専用で、学生が自分の端末で実行する(VERIFIED と提出前の確認は合言葉、ほかはキー一つの確認)。AI が実行すると学生の確認を装うことになるので止めた。学生に、証拠ノートの画面(AI が起動してよい)か端末のコマンドと、その理由を案内する。AI が使えるのは 'rk.py check・status・facts' と機械の作業用コマンド。" "'./rk setup/confirm/apply/verify/style/resolve/signoff/disclose/changes/optout/import-docx/sign/trust/update-tools' are for the student at their own terminal (the passphrase for VERIFIED and the pre-submission confirmation, a key press for the rest). Running them would pose as the student's confirmation. Point the student to the evidence notebook (you may start it) or the terminal command, and say why. The AI may use 'rk.py check/status/facts' and the machine subcommands.")"
+    if printf '%s\n' "$SCAN" | LC_ALL=C grep -q '^human'; then HUMAN_HIT=1; else HUMAN_HIT=0; fi
+    # the evidence notebook is the student's to start (./rk notebook at their terminal)
+    if [ "$HUMAN_HIT" = 1 ] && has "${RKCMD}$RKOPTS[\"']?notebook([\"'[:space:]]|$)"; then deny_out "$NB_WHY"; fi
+    if [ -z "$RK_PY" ] && has "${RKCMD}$RKOPTS[\"']?notebook([\"'[:space:]]|$)"; then deny_out "$NB_WHY"; fi
+    # human-only commands (any launcher or path; options may come before the subcommand)
+    if [ "${HUMAN_HIT:-0}" = 1 ] || has "${RKCMD}$RKOPTS[\"']?($HUMAN_RE)[\"']?([[:space:]]|$)"; then
+      deny_out "$(t "'./rk setup・confirm・apply・verify・style・resolve・signoff・disclose・changes・optout・import-docx・sign・trust・update-tools' は人間専用で、学生が自分の端末で実行する(VERIFIED と提出前の確認は合言葉、ほかはキー一つの確認)。AI が実行すると学生の確認を装うことになるので止めた。学生に、証拠ノートの画面(学生が端末で ./rk notebook)か端末のコマンドと、その理由を案内する。AI が使えるのは 'rk.py check・status・facts' と機械の作業用コマンド。" "'./rk setup/confirm/apply/verify/style/resolve/signoff/disclose/changes/optout/import-docx/sign/trust/update-tools' are for the student at their own terminal (the passphrase for VERIFIED and the pre-submission confirmation, a key press for the rest). Running them would pose as the student's confirmation. Point the student to the evidence notebook (./rk notebook in their terminal) or the terminal command, and say why. The AI may use 'rk.py check/status/facts' and the machine subcommands.")"
     fi
     if has '(^|[^a-z0-9_.-])(script|expect|unbuffer|socat|tmux|screen|zpty|winpty|conpty)([[:space:]]|$)|import[[:space:]]+pty|from[[:space:]]+pty|pty\.(spawn|fork|openpty)|openpty|forkpty|pexpect'; then
       deny_out "$(t "端末を模擬する道具(script・expect・pty など)は、このプロジェクトでは AI が使わない。人間専用の経路(端末)を装えるため。" "Terminal emulators (script, expect, pty, ...) are not used by the AI here: they could pose as the human-only terminal channel.")"
@@ -303,7 +347,7 @@ case "$TOOL" in
     touches 'sources/(register|claims)\.csv|(register|claims)\.csv' && deny_class ledger
     touches '(^|[^a-z0-9_-])thinking/' 'thinking/' && deny_class thinking
     touches 'data/raw' && deny_class raw
-    if has '(127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0):[0-9]+/api/'; then
+    if has '(127\.[0-9.]+|localhost|\[?::1\]?|\[?::ffff:127\.[0-9.]+\]?|0\.0\.0\.0|0x7f[0-9a-f]*|2130706433|0177\.[0-7.]+|\[?0:0:0:0:0:0:0:1\]?)(:[0-9]+)?/api/|(^|[^a-z0-9])(nc|ncat|netcat|telnet)[[:space:]].*(127\.|localhost|::1)'; then
       deny_out "$(t "証拠ノートのローカル API は人間がブラウザで使うもの。AI は 'python3 tools/rk/rk.py annot list|reply|flag' を使う(解決や VERIFIED は付けられない)。" "The notebook's local API is for the person in the browser. The AI uses 'python3 tools/rk/rk.py annot list|reply|flag' (it cannot resolve or verify).")"
     fi
     if has '(^|[;&|[:space:]])git([[:space:]]+-[^[:space:]]+)*[[:space:]]+(add|stage)([[:space:]]|$)' && has '\.ryukoku/cache|(^|[[:space:]/])\.cache/|api_cache|api-responses'; then

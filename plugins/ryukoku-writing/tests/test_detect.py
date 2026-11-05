@@ -54,9 +54,19 @@ class ShellRoutes(unittest.TestCase):
     def run_ai(self, cmd, tuid, allow_ask=True):
         return self.E.ai_bash(cmd, tuid=tuid, allow_ask=allow_ask)
 
+    def slip(self, py, tuid):
+        """A route the hooks cannot see through: a script the AI wrote, run after the student allowed it."""
+        self.E.ai_write(self.E.path("scratch", tuid + ".py"), py, tuid=tuid + "w")
+        d, ctx = self.run_ai("python3 scratch/%s.py" % tuid, tuid)
+        self.assertEqual(d, "ask")
+        return ctx
+
     def test_variable_concatenation(self):
-        d, ctx = self.run_ai('D=manu; D="${D}script"; printf "\\n要因 A について。\\n" >> "$D/main.md"', "m1")
-        self.assertEqual(d, "ask")  # the allow-list asks first (assignment); if the student allows it, it is recorded
+        # a write whose target is a variable is denied outright in a prohibited course (its target is unknown)
+        d, _ctx = self.run_ai('D=manu; D="${D}script"; printf "\\n要因 A について。\\n" >> "$D/main.md"', "m1")
+        self.assertEqual(d, "deny")
+        # a script the student allowed still gets through; then it is recorded
+        ctx = self.slip("p='manu'+'script/main.md'\nopen(p,'a').write('\\n要因 A について。\\n')\n", "m1b")
         self.assertIn("由来の記録", ctx)
         self.assertRecorded("variable concatenation")
         self.assertTrue(any(e["tool"] == "Bash" for e in prov(self.E)))
@@ -72,7 +82,8 @@ class ShellRoutes(unittest.TestCase):
         self.assertRecorded("script file")  # and if the student allows it, the write is still recorded
 
     def test_symlink_then_write(self):
-        self.run_ai('ln -s "man""uscript" mlink', "m4a")
+        self.assertEqual(self.run_ai('ln -s "man""uscript" mlink', "m4a")[0], "deny")  # the link names the manuscript
+        os.symlink("manuscript", self.E.path("mlink"))  # made some other way
         d = self.E.ai_write(self.E.path("mlink", "main.md"), "x")
         self.assertEqual(d, "deny")  # resolved before matching; the course prohibits AI writing
         rc, out = self.check()
@@ -107,7 +118,7 @@ class ShellRoutes(unittest.TestCase):
             self.assertRecorded("tar")
 
     def test_student_edit_of_an_ai_paragraph_is_recorded_as_estimated(self):
-        self.run_ai('D=manu; D="${D}script"; printf "\\nAI の段落(要因 A)。\\n" >> "$D/main.md"', "l1a")
+        self.slip("open('manu'+'script/main.md','a').write('\\nAI の段落(要因 A)。\\n')\n", "l1a")
         t = self.E.read(MS).replace("AI の段落(要因 A)。", "AI の段落を自分で直した(要因 A と B)。")
         with open(self.E.path(MS), "w", encoding="utf-8") as f:  # the student edits in their editor
             f.write(t)
@@ -119,8 +130,8 @@ class ShellRoutes(unittest.TestCase):
         self.assertIn("student_after_ai", r.stdout)
 
     def test_deleting_provenance_breaks_the_chain(self):
-        self.run_ai('D=manu; D="${D}script"; printf "\\nx\\n" >> "$D/main.md"', "e1a")
-        self.run_ai('D=manu; D="${D}script"; printf "\\ny\\n" >> "$D/main.md"', "e1c")
+        self.slip("open('manu'+'script/main.md','a').write('\\nx\\n')\n", "e1a")
+        self.slip("open('manu'+'script/main.md','a').write('\\ny\\n')\n", "e1c")
         script = ("p='.ryu'+'koku/provenance.jsonl'\nL=open(p).readlines()\nopen(p,'w').writelines(L[1:])\n")
         self.E.ai_write(self.E.path("scratch", "c.py"), script)
         d, _ = self.run_ai("python3 scratch/c.py", "e1b", allow_ask=True)

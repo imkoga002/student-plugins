@@ -398,10 +398,10 @@ def run(proj):
                     "  (別のフォルダで開いたままだと、記録と検知が働かない場面がある。)\n"
                     "  考え・直感・ニッチな着眼を AI に話すと、主張カード(claims/)に整理される。自分の主張だと確かめたら、画面のボタンで確認する。\n"
                     "  AI は確かめた主張カードと台帳の文献・保存したデータだけを材料に執筆を手伝い(科目が許すとき)、書いた段落の由来を記録し、\n"
-                    "  主張とのすり替えや根拠の不足を検証する。判断は AI に『証拠ノートを開いて』と頼み、画面で一件ずつ確かめる。" % proj,
+                    "  主張とのすり替えや根拠の不足を検証する。判断は自分の端末で ./rk notebook を実行して画面を開き、一件ずつ確かめる。" % proj,
                     "  In a terminal:  cd \"%s\"  then  claude . In the desktop app, open this folder.\n"
                     "  (If Claude Code stays open in another folder, some recording and detection does not apply.)\n"
                     "  Tell the AI your ideas and hunches; it organises them into claim cards (claims/) that you confirm on the screen.\n"
                     "  From confirmed cards, ledger sources and saved data only, the AI helps you draft (if the course allows), records\n"
-                    "  what it wrote, and checks it against your claims. Ask it to open the evidence notebook to decide item by item." % proj))
+                    "  what it wrote, and checks it against your claims. Run ./rk notebook in your terminal to decide item by item on the screen." % proj))
     return 0

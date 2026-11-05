@@ -26,7 +26,7 @@ import subprocess
 import tempfile
 
 from . import criticmarkup
-from .common import feedback_lang, tr, RkError, load_config, state_dir
+from .common import feedback_lang, tr, RkError, load_config, manuscript_files, read_text, state_dir
 
 FMT = ("docx", "pdf", "latex")
 
@@ -271,6 +271,20 @@ def build(proj, fmt="docx", out=None, files=None):
             "The pandoc defaults %s has items that are not allowed (they could run external programs): %s. Only from, to, "
             "standalone, reference-doc, citeproc, bibliography, csl, metadata.lang, variables (documentclass/papersize/fontsize) "
             "and pdf-engine (lualatex/xelatex) are allowed." % (os.path.relpath(defaults, proj), ", ".join(bad))))
+    # every bibliography entry the manuscript would render must be in the ledger at IDENTITY_CONFIRMED (the same rule
+    # as rk check --submit); a sample file outside manuscript/ (examples/...) is exported with a warning only
+    from . import citations
+    srcs = files or manuscript_sources(proj)
+    ms_dir = os.path.realpath(os.path.join(proj, "manuscript")) + os.sep
+    if any(os.path.realpath(p).startswith(ms_dir) for p in srcs):
+        keys, _star = citations.rendered(proj, [read_text(p) for p in srcs if os.path.realpath(p).startswith(ms_dir)])
+        probs = citations.problems(proj, keys)
+        if probs:
+            raise RkError(tr(feedback_lang(proj),
+                "書き出さなかった: 原稿が出す参考文献のうち、台帳にない・IDENTITY_CONFIRMED 未満のものがある(%s)。"
+                "rk.py refcheck check で確かめるか、引用から外す。" % ", ".join("%s(%s)" % kv for kv in probs[:8]),
+                "Not exported: bibliography entries the manuscript renders are missing from the ledger or below IDENTITY_CONFIRMED (%s). "
+                "Check them with rk.py refcheck check, or remove the citations." % ", ".join("%s (%s)" % kv for kv in probs[:8])))
     if fmt == "docx" and not os.path.exists(os.path.join(proj, "pandoc", "reference.docx")):
         raise RkError("pandoc/reference.docx がない。作り方: pandoc -o pandoc/reference.docx --print-default-data-file reference.docx")
     if fmt == "pdf":

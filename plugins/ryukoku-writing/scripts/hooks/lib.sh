@@ -44,12 +44,14 @@ json_escape() {
   LC_ALL=C tr -d '\000-\010\013\014\016-\037' | LC_ALL=C awk 'BEGIN{RS="\001";ORS=""}{gsub(/\\/,"\\\\");gsub(/"/,"\\\"");gsub(/\t/,"\\t");gsub(/\r/,"");gsub(/\n/,"\\n");print}'
 }
 
-# cfg_get KEY -> top-level "key: value" scalar from .ryukoku/config.yml (quotes/comments removed)
+# cfg_get KEY -> top-level "key: value" scalar from .ryukoku/config.yml (quotes/comments removed). The FIRST line
+# that sets KEY counts (Python's load_config reads it the same way); cfg_count KEY says how many lines set it.
 cfg_get() {
   local f="$PROJ/.ryukoku/config.yml"
   [ -f "$f" ] || return 0
-  LC_ALL=C sed -n "s/^$1:[[:space:]]*//p" "$f" | head -n 1 | sed -e 's/^#.*$//' -e 's/[[:space:]]#.*$//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+  LC_ALL=C sed -n "s/^$1[[:space:]]*:[[:space:]]*//p" "$f" | head -n 1 | sed -e 's/^#.*$//' -e 's/^"\([^"]*\)".*$/\1/' -e "s/^'\([^']*\)'.*\$/\1/" -e 's/[[:space:]]#.*$//' -e 's/[[:space:]]*$//'
 }
+cfg_count() { LC_ALL=C grep -c "^$1[[:space:]]*:" "$PROJ/.ryukoku/config.yml" 2>/dev/null || echo 0; }
 
 # project_dir CWD_FROM_JSON -> CLAUDE_PROJECT_DIR, else cwd from the hook JSON, else $PWD
 project_dir() {
@@ -92,6 +94,19 @@ marker_up() {
     n=$((n + 1))
   done
   return 1
+}
+
+# phys_file PATH -> PATH with its directory resolved and, when the last component is a symbolic link, the link
+# followed (at most 8 times; POSIX readlink without -f, so it works with BSD tools too)
+phys_file() {
+  local p="$1" n=0 t d
+  while [ -L "$p" ] && [ $n -lt 8 ]; do
+    t="$(readlink "$p" 2>/dev/null)" || break
+    case "$t" in /*) p="$t" ;; *) p="${p%/*}/$t" ;; esac
+    n=$((n + 1))
+  done
+  d="$(phys_dir "${p%/*}" 2>/dev/null)" || { printf '%s' "$p"; return 0; }
+  printf '%s/%s' "$d" "${p##*/}"
 }
 
 # abs_of PATH BASE -> PATH made absolute against BASE ("\" -> "/"; Windows drive paths returned as they are)
@@ -145,8 +160,9 @@ rel_norm() {
   printf '%s' "$f"
 }
 
-# path_class REL -> one of: manuscript ryukoku tools questions searchlog thinking statement disclosure annotations ledger claude
-#                   runconfig startup raw statehome settings ci proposals claims verification research other
+# path_class REL -> one of: manuscript ryukoku tools questions searchlog thinking statement disclosure annotations ledger
+#                   bibliography claude runconfig startup raw statehome ci proposals claims verification research other
+# (the Python twin is scripts/rk/rklib/paths.py; a test keeps them in agreement)
 # REL must already be normalised. A "manuscript" segment anywhere counts (also absolute paths that point at
 # another checkout of the same project, and Windows paths passed with a foreign cwd).
 path_class() {
@@ -168,6 +184,7 @@ path_class() {
     */disclosure/*|*/disclosure) echo disclosure; return ;;
     */review/annotations.json|*/review/annotations-log.jsonl) echo annotations; return ;;
     */sources/register.csv|*/sources/claims.csv) echo ledger; return ;;
+    */sources/references.json) echo bibliography; return ;;
     */data/raw/*) echo raw; return ;;
     */.github/*|*/.githooks/*|*/.git/hooks/*) echo ci; return ;;
     */proposals/*) echo proposals; return ;;
@@ -181,6 +198,18 @@ path_class() {
 # utf8_clean: drop bytes that do not form valid UTF-8 (byte-wise matches in LC_ALL=C can split a character)
 utf8_clean() {
   if command -v iconv >/dev/null 2>&1; then iconv -f UTF-8 -t UTF-8 -c 2>/dev/null || cat; else LC_ALL=C tr -d '\200-\377'; fi
+}
+
+# tool_input_paths: stdin hook JSON -> one value per line: every string value inside tool_input that looks like a
+# path (has a / or \, or names a file with an extension), except fields that carry text rather than a path
+tool_input_paths() {
+  LC_ALL=C grep -o '"[A-Za-z0-9_]*"[[:space:]]*:[[:space:]]*"[^"]*"' | while IFS= read -r kv; do
+    k="${kv#\"}"; k="${k%%\"*}"
+    case "$k" in content|text|body|old_string|new_string|new_str|old_str|prompt|description|query|url|pattern|command|new_source|message|comment|title|tool_name|hook_event_name|session_id|tool_use_id|transcript_path|cwd|permission_mode) continue ;; esac
+    v="${kv#*:}"; v="${v#"${v%%[![:space:]]*}"}"; v="${v#\"}"; v="${v%\"}"
+    case "$v" in *"\\n"*) continue ;; esac
+    case "$v" in */*|*\\*|*.md|*.csv|*.json|*.jsonl|*.yml|*.yaml|*.txt|*.py|*.sh) printf '%s\n' "$v" | sed 's#\\\\#\\#g' ;; esac
+  done
 }
 
 # pii_scan: stdin text -> lines "kind<TAB>line<TAB>masked" (never prints the full value)
