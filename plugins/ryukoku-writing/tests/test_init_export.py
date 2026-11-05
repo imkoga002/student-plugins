@@ -59,7 +59,7 @@ class Init(unittest.TestCase):
                 self.assertTrue(os.path.exists(E.path("pandoc", "reference.docx")))
                 r = E.rk("export", "docx", "--file", "examples/format-examples.md")
                 self.assertEqual(r.returncode, 0, r.stderr)
-                with zipfile.ZipFile(E.path("build", "format-examples.docx")) as z:
+                with zipfile.ZipFile(E.path("build", "format-examples-sample.docx")) as z:
                     doc = z.read("word/document.xml").decode("utf-8")
                     notes = z.read("word/footnotes.xml").decode("utf-8") if "word/footnotes.xml" in z.namelist() else ""
                 self.assertGreaterEqual(doc.count("<m:oMath"), 3, lang)
@@ -67,7 +67,7 @@ class Init(unittest.TestCase):
                 self.assertIn("w:footnote", notes)
                 r = E.rk("export", "latex", "--file", "examples/format-examples.md")
                 self.assertEqual(r.returncode, 0, r.stderr)
-                tex = open(E.path("build", "format-examples.tex"), encoding="utf-8").read()
+                tex = open(E.path("build", "format-examples-sample.tex"), encoding="utf-8").read()
                 self.assertIn("ltjsarticle" if lang == "ja" else "{article}", tex)
                 self.assertNotIn("babel", tex)  # no lang in the PDF/LaTeX settings
                 if not HAVE_LUALATEX:
@@ -103,7 +103,7 @@ class Init(unittest.TestCase):
                 f.write(s.replace("manuscript_lang: ja", "manuscript_lang: en").replace("feedback_lang: ja", "feedback_lang: en"))
             r = E.rk("export", "latex", "--file", "examples/format-examples.md")
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn("{article}", open(E.path("build", "format-examples.tex"), encoding="utf-8").read())
+            self.assertIn("{article}", open(E.path("build", "format-examples-sample.tex"), encoding="utf-8").read())
             self.assertIn("Once, in your own terminal", E.rk("help").stdout)
             ctx = E.hook("session-start.sh", {"cwd": E.proj}).stdout.decode()
             self.assertIn("Write all feedback", ctx)

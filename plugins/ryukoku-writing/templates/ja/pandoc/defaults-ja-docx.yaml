@@ -5,7 +5,7 @@ from: markdown+east_asian_line_breaks
 to: docx
 reference-doc: pandoc/reference.docx   # 初期化時に pandoc の既定から作る。Word でスタイル(フォント・余白・A4)だけを直す
 citeproc: true
-bibliography: sources/references.json
+# 文献一覧は書き出しのたびに台帳(sources/register.csv)から作る。ここでは bibliography を指定しない
 # csl: pandoc/style.csl                 # 学部が指定する書式の CSL(日本語は公式 CSL リポジトリに SIST02 がある)
 metadata:
   lang: ja

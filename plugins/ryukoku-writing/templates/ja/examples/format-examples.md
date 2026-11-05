@@ -135,6 +135,6 @@ flowchart TB
 
 ```text
 本文中の引用: [@key, p. 12]  /  複数: [@key1; @key2]  /  著者名を本文に出す: @key は〜と述べる
-key は sources/references.json(CSL-JSON)の id。読んで確かめた文献だけを入れる。
+key は台帳(sources/register.csv)の citekey か id。文献一覧は書き出しのたびに台帳から作る。台帳で IDENTITY_CONFIRMED の文献だけが出る。
 直接引用は「」で区別し、頁を示す(著作権法32条・48条)。
 ```

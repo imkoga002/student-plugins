@@ -57,6 +57,7 @@ HELP_JA = """rk - ryukoku-writing の道具(非公式。大学・教員の指示
   ./rk changes          守られているファイル(道具・設定・記録)の変更の検知を判断する
   ./rk disclose         AI 利用の概要を日ごとに自分の言葉で書く
   ./rk optout           学習へのオプトアウトの確認を記録する
+  ./rk figures          出典の無い数字のうち、出典の要らないもの(自分の調査の設計・例など)に印を付ける
   ./rk import-docx F --doc manuscript/X.md   指導教員が Word に入れたコメントを取り込む
   ./rk trust            別の PC で、署名者の指紋を照らして信頼する
 誰が使ってもよい: ./rk check(検査。CI と同じ)、./rk status、./rk facts(開示の事実の一覧と由来)
@@ -70,7 +71,7 @@ Decide on the screen (recommended): run ./rk notebook in your own terminal and o
   Open each item, check it and record it with a button. Only VERIFIED and the final pre-submission confirmation
   need the passphrase.
 Or item by item in the terminal:
-  ./rk confirm / verify / signoff / apply / style / resolve / changes / disclose / optout / import-docx / trust
+  ./rk confirm / verify / signoff / apply / style / resolve / changes / disclose / optout / figures / import-docx / trust
 Anyone: ./rk check (same as CI), ./rk status, ./rk facts (facts for the AI-use disclosure, with provenance)
 Type the passphrase only into your terminal or the local page. Never into the chat or to the AI."""
 
@@ -396,6 +397,7 @@ def cmd_refcheck(proj, a):
         return 0
     rows = refcheck.apply_results(rows, results)
     ledger.write(reg, rows, ledger.REGISTER)
+    ledger.record_identity(proj, rows, results)
     for res in results:
         append_jsonl(os.path.join(proj, "sources", "verification-log.jsonl"), refcheck.log_entry(res))
     out(L(proj, "機械の列を更新した。VERIFIED は学生が原典を読んで付ける(証拠ノートか ./rk verify)。",
@@ -713,7 +715,7 @@ def build_parser():
     s = sub.add_parser("verify"); s.add_argument("ids", nargs="*")
     sub.add_parser("style")
     s = sub.add_parser("resolve"); s.add_argument("ids", nargs="*")
-    sub.add_parser("signoff"); sub.add_parser("disclose"); sub.add_parser("changes"); sub.add_parser("optout")
+    sub.add_parser("signoff"); sub.add_parser("disclose"); sub.add_parser("changes"); sub.add_parser("optout"); sub.add_parser("figures")
     s = sub.add_parser("import-docx"); s.add_argument("file"); s.add_argument("--doc", required=True)
     s = sub.add_parser("sign"); s.add_argument("kind", choices=sorted(subjects.KIND_DECISIONS)); s.add_argument("id"); s.add_argument("--decision", required=True); s.add_argument("--note")
     return p

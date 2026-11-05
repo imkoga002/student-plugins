@@ -53,7 +53,7 @@ import shutil
 import time
 
 from . import ailog, execgate, provenance, sign, style, subjects, trust
-from .common import (load_config, manuscript_files, register_project, rel, sha256_bytes, sha256_file, state_dir,
+from .common import (ExclusiveLock, load_config, manuscript_files, register_project, rel, sha256_bytes, sha256_file, state_dir,
                      state_home, trust_path)
 
 MAX_FILE = 20 * 1024 * 1024
@@ -257,10 +257,44 @@ def _witness_dir():
     return os.path.join(d, "witness") if d else None
 
 
+def _lock(st):
+    """One lock for every read-modify-write of the window store (open.json, windows/, baseline.json): parallel tool
+    calls run their hooks at the same time, and an unlocked update loses windows."""
+    return ExclusiveLock(os.path.join(st, "windows.lock"))
+
+
+def _leftover_windows(st, known):
+    """Window snapshots on disk that open.json does not list (an update that was lost, or a crash), not yet stale."""
+    out = []
+    d = os.path.join(st, "windows")
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return out
+    now = time.time()
+    for fn in names:
+        if not fn.endswith(".json"):
+            continue
+        k = fn[:-5]
+        if k in {re.sub(r"[^A-Za-z0-9_-]", "_", x)[:80] for x in known}:
+            continue
+        try:
+            if now - os.path.getmtime(os.path.join(d, fn)) < WINDOW_STALE:
+                out.append(k)
+        except OSError:
+            pass
+    return out
+
+
 def pre(proj, tool_use_id="", mode="run"):
-    """Open a window. MODE 'ask': the student is asked first; the window only counts if PostToolUse comes."""
+    """Open a window (it stays open until its PostToolUse, or until the turn ends)."""
     register_project(proj)
     st = state_dir(proj)
+    with _lock(st):
+        return _pre(proj, st, tool_use_id, mode)
+
+
+def _pre(proj, st, tool_use_id, mode):
     raw = _load(os.path.join(st, "open.json"), {})
     w = _windows(st)
     expired = [k for k in raw if k not in w]
@@ -273,12 +307,13 @@ def pre(proj, tool_use_id="", mode="run"):
     # a window that asked the student stays open until its PostToolUse (calls may overlap: the next call's
     # PreToolUse can come before this one's PostToolUse). Declined calls are closed at the end of the turn (turn_end)
     old = _load(os.path.join(st, "baseline.json"), None)
+    leftovers = _leftover_windows(st, w) if not w else []
     if not w or old is None or "append" not in old:
         if not w:
             try:
                 # what changed since the last call is the student's (estimated); after a window was dropped unfinished,
-                # it may be the AI's (uncertain)
-                provenance.sync_student(proj, uncertain=bool(expired))
+                # or while a window snapshot is still on disk without its entry, it may be the AI's (uncertain)
+                provenance.sync_student(proj, uncertain=bool(expired or leftovers))
             except OSError:
                 pass
         base = _baseline(proj, st, old)
@@ -303,10 +338,16 @@ def turn_end(proj):
     is still open got no PostToolUse (the student declined it, or the call failed). It is closed; whatever changed
     while it was open is recorded as uncertain (counted with the AI's), because the call may have run."""
     st = state_dir(proj)
+    with _lock(st):
+        return _turn_end(proj, st)
+
+
+def _turn_end(proj, st):
     raw = _load(os.path.join(st, "open.json"), {})
-    if not raw:
+    if not raw and not _leftover_windows(st, {}):
         return {"closed": 0}
-    for k in list(raw):
+    left = _leftover_windows(st, raw)
+    for k in list(raw) + left:
         shutil.rmtree(_wdir(st, k), ignore_errors=True)
         try:
             os.remove(_wpath(st, k))
@@ -392,6 +433,11 @@ def _already_logged(proj, since, path, after):
 
 def post(proj, tool="", summary="", tool_use_id="", command="", file_path=""):
     st = state_dir(proj)
+    with _lock(st):
+        return _post(proj, st, tool, summary, tool_use_id, command, file_path)
+
+
+def _post(proj, st, tool, summary, tool_use_id, command, file_path):
     out = {"entries": [], "manuscript_changed": [], "other_changed": []}
     tuid = tool_use_id or "anon"
     w = _windows(st)
@@ -588,6 +634,29 @@ def pending(proj, idx):
         if not sign.current(idx, "change", s.sid, s.digest):
             out.append(s)
     return out
+
+
+def config_detections_open(proj):
+    """Ids of detections that name .ryukoku/config.yml and have no current decision by the student (a light
+    'change' confirmation). Cheap: only light records are checked, no signature work (decisions on detections are
+    light confirmations). Used by common.config_problems: until the student decides, the settings are unreadable."""
+    want = []
+    for s in subjects.changes(proj):
+        e = s.content or {}
+        names = [str(x) for x in (e.get("parts") or []) + (e.get("files") or [])] + [str(e.get("path") or "")]
+        if any(".ryukoku/config.yml" in x for x in names):
+            want.append(s)
+    if not want:
+        return []
+    by = {}
+    try:
+        recs = sign.read_signoffs(proj)
+    except Exception:  # noqa: BLE001 - unreadable records: nothing is decided
+        recs = []
+    for r in recs:
+        if r.get("kind") == "change" and sign.is_light(r) and sign.verify_record(r, {})[0]:
+            by[r.get("subject")] = r
+    return [s.sid for s in want if not (by.get(s.sid) and by[s.sid].get("digest") == s.digest)]
 
 
 def active(proj):

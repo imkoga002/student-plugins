@@ -54,6 +54,9 @@ WRITE_CMDS = {"tee", "cp", "mv", "dd", "install", "rsync", "ln", "truncate", "rm
 INPLACE_CMDS = {"sed", "perl", "ruby"}            # write their file arguments only with -i / --in-place
 OUTPUT_OPT_CMDS = {"pandoc", "curl", "wget", "iconv", "sort", "tree", "uniq"}  # write the value of -o / --output
 PY_NAMES = {"python3", "python", "py"}
+DIR_CMDS = {"cd", "pushd", "popd"}
+KEYWORDS = {"if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case", "esac", "select",
+            "function", "time", "!", "coproc", "[[", "]]"}
 PY_FLAGS = {"-B", "-I", "-u", "-E", "-s", "-S", "-O", "-OO", "-q", "-3"}
 SH_NAMES = {"bash", "sh"}
 GIT_SUBS = {"status", "log", "diff", "show", "blame", "ls-files", "rev-parse"}
@@ -328,6 +331,22 @@ def _manifest(plugin_root):
     return out
 
 
+def cdpath_possible():
+    """CDPATH may be set in the shell the AI's commands run in: in this environment, or in a shell startup file the
+    Bash tool's shell may read (the hook cannot see that shell's variables). Then a relative cd may go elsewhere."""
+    if os.environ.get("CDPATH"):
+        return True
+    home = os.path.expanduser("~")
+    for fn in (".bashrc", ".bash_profile", ".bash_login", ".profile", ".zshrc", ".zshenv", ".zprofile", ".kshrc", ".envrc"):
+        try:
+            with open(os.path.join(home, fn), encoding="utf-8", errors="replace") as f:
+                if "CDPATH" in f.read(200000):
+                    return True
+        except OSError:
+            pass
+    return False
+
+
 class Scan(object):
     def __init__(self, cwd, plugin_root, proj):
         self.cwd = cwd or os.getcwd()
@@ -336,7 +355,8 @@ class Scan(object):
         self.found = []
         self.cwd_unknown = False
         self.dirstack = []
-        self.cdpath = bool(os.environ.get("CDPATH"))
+        self.dir_certain = True
+        self.cdpath = cdpath_possible()
         self._tools_ok = None
         self.ai = ai_files()
         self.ai_shas = {v.get("sha") for v in self.ai.values() if isinstance(v, dict) and v.get("sha")}
@@ -429,12 +449,32 @@ class Scan(object):
             cmds = split_commands(lex(cmd))
         except Unparsed as e:
             self.add("unparsed", str(e))
+            # a construct that is not analysed (a subshell, a function, a here-document...) with a write form in it:
+            # its target is unknown (denied under prohibited / unreadable settings, asked otherwise)
+            if re.search(r"(^|[^0-9&<>])>(?!\s*/dev/null)|(^|[\s;&|(])(%s)(\s|$)" % "|".join(sorted(WRITE_CMDS | INPLACE_CMDS)), cmd or ""):
+                self.add("unknown_target", "(%s)" % str(e))
             # still name AI-written files that appear in it
             self.note_ai_files([(w, False, False) for w in re.findall(r"[^\s'\"<>|;&()`$]+", cmd)], self.cwd)
             return
         cwd = self.cwd
-        for words, reds, sep in cmds:
+        # A directory change is followed only where bash certainly runs it in this shell: a command that starts a
+        # statement (after ";", a newline, "&" or the start) or continues an "&&" chain from there, is not part of a
+        # pipeline and is not sent to the background. A cd after "||", in a pipeline, in the background, after a
+        # control keyword (if/then/while/...), or as an argument (env cd, command cd, xargs cd) makes the directory
+        # unknown for the rest of the command: every later relative write target is then unknown.
+        keyworded = any(w and w[0][0] in KEYWORDS for w, _r, _s in cmds)
+        chain_ok = True
+        for k, (words, reds, sep) in enumerate(cmds):
+            nxt = cmds[k + 1][2] if k + 1 < len(cmds) else ""
+            if sep in ("", ";", "&"):
+                chain_ok = True
+            elif sep != "&&":
+                chain_ok = False      # "||", "|", "|&"
+            certain = chain_ok and not keyworded and nxt not in ("|", "|&", "&") and sep not in ("|", "|&")
+            self.dir_certain = certain
             cwd = self.simple(words, reds, cwd)
+            if any(w[0] in DIR_CMDS for w in words[1:]):
+                self.cwd_unknown = True
 
     def _redirects(self, reds, cwd):
         for op, (text, dyn, glob) in reds:
@@ -494,7 +534,10 @@ class Scan(object):
                 return cwd
             self.add("ask", "%s %s(--version 以外の起動は外部のプログラムを動かしうる)" % (base, " ".join(args[:3])))
             return cwd
-        if base in ("cd", "pushd", "popd"):
+        if base in DIR_CMDS:
+            if not self.dir_certain:
+                self.cwd_unknown = True
+                return cwd
             return self.change_dir(base, words[1:], cwd)
         if base in PY_NAMES:
             return self.python(name, args, cwd)
@@ -556,6 +599,9 @@ class Scan(object):
             new = os.path.normpath(hits[0])
         else:
             new = os.path.normpath(os.path.join(cwd, os.path.expanduser(t)))
+        if not os.path.isdir(new):
+            self.cwd_unknown = True  # bash's cd fails there; what runs next, and where, is not certain
+            return cwd
         if base == "pushd":
             self.dirstack.append(cwd)
         return new

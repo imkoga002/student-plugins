@@ -32,7 +32,7 @@ import json
 import os
 
 from . import ailog, claimcards, ledger, proposals, provenance, style
-from .common import load_config, manuscript_files, project_id, rel, sha256_file, subject_hash
+from .common import load_config, manuscript_files, project_id, read_text, rel, sha256_file, subject_hash
 
 KIND_DECISIONS = {
     "source": ("VERIFIED", "REJECTED"),
@@ -49,6 +49,7 @@ KIND_DECISIONS = {
     "presubmit": ("ready",),
     "import": ("imported",),
     "guarded": ("confirmed",),
+    "figure": ("no_source_needed",),
 }
 POLICY_KEYS = ("course_name", "ai_policy", "ai_allowed_uses", "ai_policy_source", "disclosure_format")
 CHECKLIST_IDS = ("claims_mine", "disclosure_true", "facts_verified", "quotes_marked", "integrity",
@@ -362,7 +363,20 @@ def guarded_subject(proj, base_ref=None):
                    {"scope": sid, "files": sorted(files), "sha": files, "base_ref": base_ref or ""}, "")
 
 
-POOLS = {"source": sources, "card": cards, "claim": claims, "rule": rules, "comment": comments, "hunk": hunks,
+def figures(proj):
+    """Figures in the manuscript whose sentence has no source (verification.unsourced_figures, marks ignored): the
+    subjects of the student's 'needs no source' light confirmation (./rk figures)."""
+    from . import verification
+    out = []
+    for p in manuscript_files(proj):
+        relp = rel(proj, p)
+        for ln, tok, sent, subj, dg in verification.unsourced_figures(proj, read_text(p), relp, marks={}):
+            out.append(Subject("figure", subj, dg, "%s:%d 「%s」 %s" % (relp, ln, tok, sent[:80]),
+                               {"file": relp, "line": ln, "token": tok, "sentence": sent}, ""))
+    return out
+
+
+POOLS = {"figure": figures, "source": sources, "card": cards, "claim": claims, "rule": rules, "comment": comments, "hunk": hunks,
          "section": sections, "ailog": ailog_days, "change": changes}
 
 

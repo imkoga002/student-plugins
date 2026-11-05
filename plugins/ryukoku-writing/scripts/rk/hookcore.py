@@ -25,6 +25,7 @@ and treat any failure as "nothing to report" (a broken helper must never break t
 """
 import json
 import os
+import re
 import sys
 import unicodedata
 
@@ -53,6 +54,19 @@ def main(argv):
         data = sys.stdin.buffer.read().decode("utf-8", "replace")
         sys.stdout.write(unicodedata.normalize("NFKC", data).replace("−", "-").replace("‐", "-")
                          .replace("‑", "-").replace("–", "-").replace("—", "-").replace("ー", "-"))
+        return 0
+    if cmd == "toolpaths":
+        # every string leaf of tool_input (nested objects and arrays included) that may name a file: "A<TAB>path" for
+        # an absolute path, "R<TAB>path" for a relative one (the hook cannot know what it is relative to)
+        try:
+            obj = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace") or "{}")
+        except ValueError:
+            print("R\t(unparsable tool input)")
+            return 0
+        ti = obj.get("tool_input") if isinstance(obj, dict) else None
+        for v in tool_paths(ti):
+            absolute = v.startswith(("/", "~", "\\")) or (len(v) > 2 and v[1] == ":" and v[2] in "/\\")
+            print("%s\t%s" % ("A" if absolute else "R", v.replace("\t", " ").replace("\n", " ")))
         return 0
     if cmd == "preall":
         from rklib import msguard
@@ -134,6 +148,38 @@ def main(argv):
     elif cmd == "session":
         print(json.dumps(session(proj, argv[2] if len(argv) > 2 else "", argv[3] if len(argv) > 3 else ""), ensure_ascii=False))
     return 0
+
+
+TEXT_KEYS = {"content", "text", "body", "old_string", "new_string", "new_str", "old_str", "prompt", "description",
+             "query", "url", "pattern", "command", "new_source", "message", "comment", "title", "edits", "todos",
+             "insert_text", "replacement", "search", "regex"}
+PATH_KEY_HINTS = ("path", "file", "dir", "folder", "dest", "target", "src", "source", "output", "out", "name", "root",
+                  "cwd", "location", "notebook")
+
+
+def tool_paths(node, key="", depth=0):
+    """Strings in NODE that may name a file: under a key that hints at a path, or that contain a path separator or
+    look like a file name with an extension. Text-carrying keys are skipped (their content is checked elsewhere)."""
+    out = []
+    if depth > 12:
+        return out
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if str(k).lower() in TEXT_KEYS:
+                continue
+            out += tool_paths(v, str(k), depth + 1)
+    elif isinstance(node, list):
+        for v in node:
+            out += tool_paths(v, key, depth + 1)
+    elif isinstance(node, str):
+        v = node.strip()
+        if not v or "\n" in v or len(v) > 4096:
+            return out
+        hinted = any(h in key.lower() for h in PATH_KEY_HINTS)
+        looks = ("/" in v or "\\" in v or v.startswith("~")) and " " not in v.strip("/") or bool(re.match(r"^[^\s/\\]+\.[A-Za-z0-9]{1,6}$", v))
+        if (hinted and not re.match(r"^[a-z][a-z0-9+.-]*://", v)) or looks:
+            out.append(v)
+    return out
 
 
 def with_checks(proj, res):

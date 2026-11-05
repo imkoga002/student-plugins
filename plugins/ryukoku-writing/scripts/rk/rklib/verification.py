@@ -42,23 +42,41 @@ FACTUAL = ("によれば", "調査", "統計", "データ", "研究", "報告", 
            "according to", "survey", "data", "study", "studies", "report", "rate", "percent", "share")
 OPINION = ("と考える", "と考えられる", "と思われる", "だろう", "ではないか", "かもしれない", "と主張する", "と論じる", "本稿は",
            "筆者は", "と言える", "といえる", "I argue", "we argue", "this paper", "this essay", "I suggest", "may ", "might")
-# A figure: a number with a unit of quantity, a decimal, or a large integer (a thousands separator or five digits and
-# more), written in Arabic digits (full-width ones are read as ASCII first) or in kanji numerals (三割, 百万人). A number
-# right after kana or kanji counts (only an ASCII letter, digit or "." before it says it is part of a name). Not
-# figures: years (2020年, 1990年代, a bare 2030), section, chapter, article, figure, table and equation numbers (3.2 節,
-# 第 2 章, 図 1.2, 表 3, 式 (2.3), Figure 2, Table 3.1), versions (v1.2, 2.0.0, Python 3.13), page ranges, numbers in
-# URLs, code and math. It is a heuristic: a figure in words ("twelve per cent") or with a unit not listed is missed.
-UNITS = (r"%|パーセント|ポイント|percentage points?|per ?cent|percent|か国|カ国|ヵ国|ヶ国|ケ国|箇国|割|倍|位|人|名|件|円|"
-         r"万|億|兆|社|校|時間|点|ドル|歳|才|回|世帯|times|million|billion|thousand|trillion|points?")
-NUM = re.compile(r"(?<![0-9A-Za-z.第])\d[\d,]*(?:\.\d+)?\s*(?:" + UNITS + r")"
-                 r"|(?<![0-9A-Za-z.第§])\d+\.\d+(?![\w.]|\s*(?:節|章|項|条|版|section|chapter))"
-                 r"|(?<![0-9A-Za-z.])\d{1,3}(?:,\d{3})+(?![\d.,])|(?<![0-9A-Za-z.])\d{5,}(?![\d.,])"
-                 r"|[〇一二三四五六七八九十百千]{2,}(?:万|億|兆)?\s*(?:" + UNITS + r")"
-                 r"|[〇一二三四五六七八九十百千](?:割|倍|パーセント|万|億|兆)")
-# labels and names that a number follows without being a figure (removed before matching)
-NOT_FIGURE = re.compile(r"(?:図|表|式|写真|資料|付録|Figure|Fig\.|Table|Tab\.|Eq\.|Equation|Appendix)\s*[(（]?\s*[0-9]+(?:[.\-‐][0-9]+)*\s*[)）]?"
-                        r"|\b[A-Z][A-Za-z+#]*\s+v?[0-9]+(?:\.[0-9]+)+\b(?!\s*(?:" + UNITS + r"))"
-                        r"|\b[vV](?:er\.?|ersion)?\s?[0-9]+(?:\.[0-9]+)+|第\s*[0-9]+")
+# Figures. Every number in body prose is a candidate: Arabic digits (full-width ones are read as ASCII first) and
+# kanji numerals followed by a counter or unit (三割, 百人, 数百人, 二千人; a lone 一 and words such as 十分 are not
+# numbers). A short, explicit list is exempt: years and year ranges (2020年, 1990年代, 2019-2021, a bare 2030), dates
+# and clock times (11月5日, 午後3時), references to figures, tables, equations, sections, chapters, questions and pages
+# (図1, 表3.1, 式 (2.3), (2.3) より, 3.2 節, 第2章, Section 3.2, p. 3), versions (v1.2, ver 2.0.0, Python 3.13, 3.2.1),
+# standard identifiers (ISO 27001, JIS X 0208, RFC 9110), ordinals (第1位, 2回目, 3番目, 1人ずつ, 2つの), list
+# numbers at the start of a line, and numbers in headings, code, math, URLs, citation keys, data paths and HTML
+# comments. It is a heuristic: numbers spelled out in words ("three", 三つ) slip through, and a number the list does
+# not exempt is reported even when it needs no source (the student can mark it: ./rk figures).
+UNITS = (r"%|パーセント|ポイント|percentage points?|per ?cent|percent|か国|カ国|ヵ国|ヶ国|ケ国|箇国|か所|カ所|ヶ所|箇所|"
+         r"割|倍|位|人|名|件|冊|円|万|億|兆|社|校|学部|大学|館|店|時間|分|秒|日間|週間|か月|ヶ月|カ月|年間|点|ドル|歳|才|回|"
+         r"世帯|個|台|枚|本|頁|ページ|字|語|問|項目|times|million|billion|thousand|trillion|points?|hours?|minutes?|days?|"
+         r"weeks?|years? old|respondents?|students?|books?|people|persons?|items?|cases?|participants?|visitors?|users?")
+KANJI_NUM = "〇一二三四五六七八九十百千万億兆数"
+COUNTERS_J = (r"%|パーセント|ポイント|か国|カ国|ヵ国|ヶ国|ケ国|か所|カ所|ヶ所|箇所|割|倍|位|人|名|件|冊|円|社|校|学部|大学|館|店|"
+              r"時間|分|秒|日間|週間|か月|ヶ月|カ月|年間|点|ドル|歳|才|回|世帯|個|台|枚|本|頁|ページ|字|語|問|項目|万|億|兆")
+NUM = re.compile(r"(?<![0-9A-Za-z.])\d[\d,]*(?:\.\d+)?(?:\s*/\s*\d+)?(?:\s*(?:" + UNITS + r"))?(?:\s*の\s*\d+)?"
+                 r"|[" + KANJI_NUM + r"]+\s*(?:" + COUNTERS_J + r")")
+_YEAR = r"(?:1[5-9]\d{2}|20\d{2})"
+NOT_FIGURE = re.compile(
+    r"(?<![\d.,])" + _YEAR + r"(?:\s*[-–—〜~～]\s*" + _YEAR + r")?\s*(?:年度|年代|年|s\b)"
+    r"|(?<![\d.,])" + _YEAR + r"\s*[-–—〜~～]\s*" + _YEAR + r"(?![\d.,])"
+    r"|(?<![\d.,])" + _YEAR + r"(?![\d.,]|\s*(?:" + UNITS + r"))"
+    r"|\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?|(?<!\d)\d{1,2}\s*日(?!間)|(?:午前|午後)\s*\d{1,2}\s*時(?:\s*\d{1,2}\s*分)?"
+    r"|(?<!\d)\d{1,2}\s*時(?!間)(?:\s*\d{1,2}\s*分)?|(?<!\d)\d{1,2}:\d{2}(?!\d)"
+    r"|(?:図|表|式|写真|資料|付録|別表|設問|問|Q|Figure|Fig\.|Table|Tab\.|Eq\.|Equation|Appendix|Section|Sec\.|Chapter|Ch\.|"
+    r"§|第|節|章|項|pp?\.)\s*[(（]?\s*\d+(?:\s*[.\-‐–]\s*\d+)*\s*[)）]?"
+    r"|\d+(?:\.\d+)*\s*(?:節|章|項|条|編)"
+    r"|[(（]\s*\d+(?:\.\d+)*\s*[)）]"
+    r"|\b[vV](?:er\.?|ersion)?\s?\d+(?:\.\d+)+|\bver\.?\s*\d+(?:\.\d+)*|\b\d+\.\d+\.\d+(?:\.\d+)*"
+    r"|(?<![A-Za-z])[A-Z][A-Za-z+#]*\s*v?\d+(?:\.\d+)+(?![\d.])(?!\s*(?:" + UNITS + r"))"
+    r"|\b(?:ISO|IEC|JIS|IEEE|RFC|ANSI|DIN|EN|BS|ECMA|ITU-T|ISBN|ISSN|DOI|NCID|CRID)(?:/IEC)?\s*[A-Z]?\s*[-:/]?\s*\d[\d.\-:/]*"
+    r"|\d+\s*(?:回目|番目|つ目|人目|度目|件目|冊目|日目|年目)|\d+\s*(?:人|件|冊|個|つ|名|問)\s*ずつ|(?<!\d)[1-9]\s*つ"
+    r"|(?m:^\s*\d+[.)]\s)")
+KANJI_NOT = re.compile(r"十分|一[" + KANJI_NUM[:-1] + r"]*?(?=[^" + KANJI_NUM + r"])|万一|数(?:回|人|件|名|点|日|本|個|社|校)")
 DATAREF = re.compile(r"(?<![\w/])data/(?:raw|processed)/[\w./-]+")
 FOOTREF = re.compile(r"\[\^([^\]]+)\](?!:)")
 
@@ -72,8 +90,13 @@ def _has(text, words):
     return [w for w in words if w.lower() in t]
 
 
+ABBREV = re.compile(r"\b(?:pp|p|e\.g|i\.e|cf|Figs?|Eqs?|Nos?|Vols?|vol|eds?|et al|vs|ver|Secs?|Ch|Tabs?|approx|Dr|Mr|Ms|Prof|St|etc|n)\.(?=\s)")
+
+
 def sentences(text):
-    return [s.strip() for s in re.split(r"(?<=[。．!?！？])|(?<=\.)\s+", text) if s.strip()]
+    """Sentences of TEXT (。．!? and ". "; the period of an abbreviation such as "pp." or "e.g." does not end one)."""
+    t = ABBREV.sub(lambda m: m.group(0)[:-1] + "\x00", text)
+    return [x.replace("\x00", ".").strip() for x in re.split(r"(?<=[。．!?！？])|(?<=\.)\s+", t) if x.strip()]
 
 
 # ------------------------------------------------------------------------------------------- per paragraph facts
@@ -134,37 +157,93 @@ def has_source(par_text, notes, proj=None):
     return False
 
 
-def figures(text):
-    """The figures (NUM above) in TEXT, after full-width characters are read as ASCII and code, math, URLs, citations
-    and figure/table/equation/version labels are removed."""
+def _clean(text):
     body = unicodedata.normalize("NFKC", text or "")
-    body = re.sub(r"\$[^$]*\$", "", re.sub(r"`[^`]*`", "", body))
+    body = re.sub(r"(?s)<!--.*?-->", " ", body)
+    body = re.sub(r"\$\$.*?\$\$|\$[^$\n]*\$", " ", re.sub(r"`[^`]*`", " ", body))
     body = re.sub(r"https?://\S+|\]\([^)]*\)", " ", body)
+    body = re.sub(r"\[\^[^\]]+\]", " ", body)
     body = re.sub(r"\[@[^\]]*\]|@\{[^}]*\}|@[\w:.#$%&+?<>~/-]+", " ", body)
     body = DATAREF.sub(" ", body)
-    body = NOT_FIGURE.sub(" ", body)
-    return [m.group(0).strip() for m in NUM.finditer(body)]
+    return NOT_FIGURE.sub(" ", body)
+
+
+def figures(text):
+    """The figures (NUM above) in TEXT after the exempt forms are removed."""
+    out = []
+    for m in NUM.finditer(_clean(text)):
+        tok = m.group(0).strip()
+        if re.match("^[" + KANJI_NUM + "]", tok):
+            num = re.match("^[" + KANJI_NUM + "]+", tok).group(0)
+            if num == "一" or KANJI_NOT.match(tok) or num == "数" or num == "万":
+                continue
+        out.append(tok)
+    return out
+
+
+def _sentence_source(sent, notes, proj):
+    """A sentence is sourced when it (or a footnote it refers to) has a citation key outside comments and code, or
+    a reference to a data file that exists."""
+    t = sent
+    for lab in FOOTREF.findall(sent):
+        t += "\n" + notes.get(lab, "")
+    return has_source(t, {}, proj)
+
+
+def figure_subject(sentence, tok):
+    """The id a student's 'no source needed' mark is bound to: the sentence (normalised) and the figure."""
+    from .common import sha256_bytes
+    norm = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", sentence)).strip()
+    return "%s:%s" % (sha256_bytes(norm.encode("utf-8"))[:16], tok), sha256_bytes(norm.encode("utf-8"))
+
+
+def figure_marks(proj):
+    """{subject: digest} of the student's light confirmations 'this figure needs no source' (kind figure,
+    decision no_source_needed, recorded at the terminal with ./rk figures; the AI cannot write .ryukoku/)."""
+    from . import sign
+    out = {}
+    try:
+        recs = sign.read_signoffs(proj)
+    except Exception:  # noqa: BLE001
+        return out
+    for r in recs:
+        if r.get("kind") == "figure" and r.get("decision") == "no_source_needed" and sign.is_light(r) and sign.verify_record(r, {})[0]:
+            out[r.get("subject")] = r.get("digest")
+    return out
+
+
+def unsourced_figures(proj, text, relp="", marks=None):
+    """[(line, token, sentence, subject, digest)] for figures in sentences without a source (not in
+    data/numeric-claims.csv, not marked by the student). Headings, code, tables, math blocks, front matter and
+    footnote definitions are skipped."""
+    notes = P.footnotes(text)
+    known = numeric_values(proj)
+    marks = figure_marks(proj) if marks is None else marks
+    out = []
+    for b in P.paragraphs(text):
+        first = b["text"].lstrip()
+        if P.FOOTDEF.match(b["text"].split("\n")[0]) or first.startswith("|") or first.startswith("$$") or first.startswith("#"):
+            continue
+        lines = unicodedata.normalize("NFKC", b["text"]).split("\n")
+        for sent in sentences(b["text"]):
+            toks = figures(sent)
+            if not toks or _sentence_source(sent, notes, proj):
+                continue
+            for tok in toks:
+                if tok in known or re.sub(r"[^\d.,]", "", tok) in known:
+                    continue
+                subj, dg = figure_subject(sent, tok)
+                if marks.get(subj) == dg:
+                    continue
+                key = tok.split()[0][:6]
+                ln = b["start"] + next((i for i, x in enumerate(lines) if key in x), 0)
+                out.append((ln, tok, sent, subj, dg))
+    return out
 
 
 def numbers_without_source(proj, text, relp=""):
-    """[(line, token)] for numbers in a paragraph that has neither a citation nor a data reference (and is not in
-    data/numeric-claims.csv). Headings, code, front matter and footnote definitions are skipped."""
-    notes = P.footnotes(text)
-    known = numeric_values(proj)
-    out = []
-    for b in P.paragraphs(text):
-        if P.FOOTDEF.match(b["text"].split("\n")[0]) or b["text"].lstrip().startswith("|") or b["text"].lstrip().startswith("$$"):
-            continue
-        toks = figures(b["text"])
-        if not toks or has_source(b["text"], notes, proj):
-            continue
-        lines = unicodedata.normalize("NFKC", b["text"]).split("\n")
-        for tok in toks:
-            if tok in known or re.sub(r"[^\d.,]", "", tok) in known:
-                continue
-            ln = b["start"] + next((i for i, x in enumerate(lines) if tok.split()[0] in x), 0)
-            out.append((ln, tok))
-    return out
+    """[(line, token)] (see unsourced_figures)."""
+    return [(ln, tok) for ln, tok, _s, _subj, _d in unsourced_figures(proj, text, relp)]
 
 
 def assertive_uncited(text, notes):

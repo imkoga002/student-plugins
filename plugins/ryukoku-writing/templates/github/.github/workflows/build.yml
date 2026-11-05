@@ -2,7 +2,7 @@ name: build
 # Markdown -> docx with a pinned pandoc (pandoc/actions/setup@v1: https://github.com/pandoc/actions). Outputs are artifacts.
 on:
   pull_request:
-    paths: ["manuscript/**", "pandoc/**", "sources/references.json", ".github/workflows/build.yml"]
+    paths: ["manuscript/**", "pandoc/**", "sources/register.csv", "sources/identity.json", ".github/workflows/build.yml"]
   workflow_dispatch:
 permissions:
   contents: read

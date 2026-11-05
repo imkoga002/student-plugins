@@ -26,8 +26,8 @@ import os
 from . import ledger, msguard, proposals, provenance, sign, style, subjects, trust
 from .common import RkError, append_jsonl, load_config, now_iso, read_text, sha256_bytes, sha256_file, state_dir, today
 
-ORDER = ("source", "card", "claim", "rule", "comment", "hunk", "change", "config", "optout", "ailog", "guarded", "import", "section",
-         "presubmit")
+ORDER = ("source", "card", "claim", "rule", "comment", "hunk", "change", "config", "optout", "ailog", "guarded", "import", "figure",
+         "section", "presubmit")
 
 
 class DecisionError(RkError):

@@ -57,6 +57,44 @@ def write(path, rows, fields):
     os.replace(tmp, path)
 
 
+IDENTITY_REL = os.path.join("sources", "identity.json")
+
+
+def read_identity(proj):
+    """{row id: {"digest", "checked_at", "source", "meta"}}: what the machine identity check recorded from the registry
+    for rows it confirmed (refcheck). Written only by `rk.py refcheck check`; the AI's tools cannot write the file."""
+    import json
+    try:
+        with open(os.path.join(proj, IDENTITY_REL), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def record_identity(proj, rows, results):
+    import json
+    cur = read_identity(proj)
+    by = {r.get("id"): r for r in rows}
+    changed = False
+    for res in results:
+        rid = res.get("id")
+        if res.get("status") is None or rid not in by:
+            continue
+        if res.get("status") == "IDENTITY_CONFIRMED":
+            cur[rid] = {"digest": source_subject(by[rid]), "checked_at": res.get("checked_at", ""),
+                        "source": res.get("source", ""), "meta": res.get("meta") or {}}
+        else:
+            cur.pop(rid, None)
+        changed = True
+    if changed:
+        p = os.path.join(proj, IDENTITY_REL)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cur, f, ensure_ascii=False, indent=1, sort_keys=True)
+        os.replace(tmp, p)
+
+
 def source_subject(row):
     return subject_hash({k: (row.get(k) or "").strip() for k in SOURCE_KEYS})
 

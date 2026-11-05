@@ -3,7 +3,7 @@ from: markdown
 to: pdf
 pdf-engine: lualatex
 citeproc: true
-bibliography: sources/references.json
+# The bibliography is built from the ledger (sources/register.csv) at each export; do not set bibliography here
 variables:
   documentclass: article
   papersize: a4

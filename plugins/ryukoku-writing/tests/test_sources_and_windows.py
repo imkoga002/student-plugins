@@ -101,10 +101,10 @@ class Figures(unittest.TestCase):
             "利用者は約三割増えた。": "三割",
             "全国で12位だった。": "12位",
             "15か国で調べた。": "15か国",
-            "来館者は約百万人だった。": "百万",
+            "来館者は約百万人だった。": "百万人",
             "貸出は1,200件に達した。": "1,200件",
             "回答率は３８．５％だった。": "38.5%",
-            "about 45000 visitors": "45000",
+            "about 45000 visitors": "45000 visitors",
             "the rate rose by 3 points": "3 points",
         }
         for text, tok in found.items():
@@ -138,43 +138,8 @@ class BibliographyContent(unittest.TestCase):
     def mismatch_lines(self):
         return [l for l in ng(self.E.rk("check", "--submit").stdout) if "lib2021" in l and "台帳と違う" in l]
 
-    def test_the_printed_entry_must_say_what_the_ledger_says(self):
-        good = {"id": "lib2021", "type": "article-journal", "title": "Library use in rural towns",
-                "author": [{"family": "Tanaka", "given": "Hana"}], "issued": {"date-parts": [[2021]]},
-                "DOI": "10.1038/s41598-023-41032-5"}
-        write_refs(self.E, [good])
-        self.assertEqual(self.mismatch_lines(), [])
-        for bad in ({"title": "A different study"}, {"issued": {"date-parts": [[2018]]}},
-                    {"author": [{"family": "Tanaka", "given": "Hana"}, {"family": "Invented", "given": "X"}]},
-                    {"DOI": "10.1000/other"}):
-            write_refs(self.E, [dict(good, **bad)])
-            self.assertTrue(self.mismatch_lines(), bad)
-            if HAVE_PANDOC:
-                r = self.E.rk("export", "latex")
-                self.assertNotEqual(r.returncode, 0, bad)
-                self.assertIn("mismatch", r.stderr, bad)
-
-    def test_only_sources_references_json_is_printed(self):
-        from rklib import export
-        d = self.E.path("pandoc", "defaults-ja-latex.yaml")
-        base = open(d, encoding="utf-8").read()
-        open(d, "w", encoding="utf-8").write(base.replace("bibliography: sources/references.json", "bibliography: sources/alt.json"))
-        open(self.E.path("sources", "alt.json"), "w").write("[]")
-        _safe, bad = export.sanitize_defaults(d, self.E.proj)
-        self.assertTrue(any(b.startswith("bibliography") for b in bad), bad)
-        open(d, "w", encoding="utf-8").write(base.replace("pdf-engine", "csl: sources/style.csl\npdf-engine") if "pdf-engine" in base
-                                              else base + "csl: sources/style.csl\n")
-        open(self.E.path("sources", "style.csl"), "w").write("<style/>")
-        _safe, bad = export.sanitize_defaults(d, self.E.proj)
-        self.assertTrue(any(b.startswith("csl") for b in bad), bad)
-        open(d, "w", encoding="utf-8").write(base)
-        t = open(self.E.path(MS), encoding="utf-8").read()
-        open(self.E.path(MS), "w", encoding="utf-8").write(t.replace("---\n", "---\nbibliography: sources/alt.json\n", 1))
-        self.assertTrue(any("bibliography" in l for l in ng(self.E.rk("check", "--submit").stdout)))
-        if HAVE_PANDOC:
-            r = self.E.rk("export", "latex")
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn("front matter", r.stderr)
+    # what the printed bibliography says is tested in test_bibliography_and_shell.Bibliography (it is built from the
+    # ledger; sources/references.json is not printed)
 
     def test_export_settings_are_closed_to_the_ai_and_a_change_needs_the_student(self):
         E = self.E

@@ -72,7 +72,11 @@ class ShellRoutes(unittest.TestCase):
         self.assertTrue(any(e["tool"] == "Bash" for e in prov(self.E)))
 
     def test_base64_path(self):
-        self.run_ai('P=$(printf bWFudXNjcmlwdC9tYWluLm1k | base64 -d); printf "\\nx\\n" >> "$P"', "m2")
+        # a command substitution with a write form: its target is unknown, denied in a prohibited course
+        d, _ctx = self.run_ai('P=$(printf bWFudXNjcmlwdC9tYWluLm1k | base64 -d); printf "\\nx\\n" >> "$P"', "m2")
+        self.assertEqual(d, "deny")
+        # the same through a script the student allowed is recorded
+        self.slip("import base64\np=base64.b64decode('bWFudXNjcmlwdC9tYWluLm1k').decode()\nopen(p,'a').write('\\nx\\n')\n", "m2b")
         self.assertRecorded("base64 path")
 
     def test_script_file(self):

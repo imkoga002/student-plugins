@@ -219,7 +219,7 @@ path_class() {
     */disclosure/statement*.md) echo statement; return ;;
     */disclosure/*|*/disclosure) echo disclosure; return ;;
     */review/annotations.json|*/review/annotations-log.jsonl) echo annotations; return ;;
-    */sources/register.csv|*/sources/claims.csv) echo ledger; return ;;
+    */sources/register.csv|*/sources/claims.csv|*/sources/identity.json) echo ledger; return ;;
     */sources/references.json) echo bibliography; return ;;
     */data/raw/*) echo raw; return ;;
     */.github/*|*/.githooks/*|*/.git/hooks/*|*/.github|*/.githooks) echo ci; return ;;

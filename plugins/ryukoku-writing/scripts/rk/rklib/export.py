@@ -276,20 +276,8 @@ def build(proj, fmt="docx", out=None, files=None):
             "The pandoc defaults %s has items that are not allowed (they could run external programs): %s. Only from, to, "
             "standalone, reference-doc, citeproc, bibliography, csl, metadata.lang, variables (documentclass/papersize/fontsize) "
             "and pdf-engine (lualatex/xelatex) are allowed." % (os.path.relpath(defaults, proj), ", ".join(bad))))
-    # every bibliography entry the manuscript would render must be in the ledger at IDENTITY_CONFIRMED (the same rule
-    # as rk check --submit); a sample file outside manuscript/ (examples/...) is exported with a warning only
     from . import citations
     srcs = files or manuscript_sources(proj)
-    # the bibliography is sources/references.json only: a front matter that names another one (or inline references,
-    # or another style) would print entries nobody compared with the ledger
-    for p in srcs:
-        ov = citations.front_matter_overrides(read_text(p))
-        if ov:
-            raise RkError(tr(feedback_lang(proj),
-                "書き出さなかった: %s の front matter に %s がある。文献一覧は sources/references.json だけから、書式は pandoc/ の設定から作る。"
-                "その行を消してから書き出す。" % (os.path.relpath(p, proj), ", ".join(ov)),
-                "Not exported: the front matter of %s sets %s. The bibliography comes from sources/references.json only and its style "
-                "from the pandoc/ settings. Remove that line and export again." % (os.path.relpath(p, proj), ", ".join(ov))))
     # the export settings are the student's: a change from the shipped copies needs the student's confirmation
     from . import sign, subjects, trust
     g = subjects.guarded_subject(proj)
@@ -305,16 +293,7 @@ def build(proj, fmt="docx", out=None, files=None):
                 "change is intended, confirm it in your terminal with ./rk sign guarded tools --decision confirmed (the AI does not write pandoc/)."
                 % ", ".join(pchanged[:6])))
     ms_dir = os.path.realpath(os.path.join(proj, "manuscript")) + os.sep
-    if any(os.path.realpath(p).startswith(ms_dir) for p in srcs):
-        keys, _star = citations.rendered(proj, [read_text(p) for p in srcs if os.path.realpath(p).startswith(ms_dir)])
-        probs = citations.problems(proj, keys)
-        if probs:
-            raise RkError(tr(feedback_lang(proj),
-                "書き出さなかった: 原稿が出す参考文献のうち、台帳にない・IDENTITY_CONFIRMED 未満・文献一覧の項目が台帳と違う(mismatch)ものがある(%s)。"
-                "rk.py refcheck check で確かめるか、sources/references.json の項目を台帳に合わせるか、引用から外す。" % ", ".join("%s(%s)" % kv for kv in probs[:8]),
-                "Not exported: bibliography entries the manuscript renders are missing from the ledger, below IDENTITY_CONFIRMED, or differ from "
-                "the ledger (mismatch) (%s). Check them with rk.py refcheck check, make the entry in sources/references.json match the ledger, "
-                "or remove the citations." % ", ".join("%s (%s)" % kv for kv in probs[:8])))
+    sample = any(not os.path.realpath(p).startswith(ms_dir) for p in srcs)
     if fmt == "docx" and not os.path.exists(os.path.join(proj, "pandoc", "reference.docx")):
         raise RkError("pandoc/reference.docx がない。作り方: pandoc -o pandoc/reference.docx --print-default-data-file reference.docx")
     if fmt == "pdf":
@@ -349,8 +328,53 @@ def build(proj, fmt="docx", out=None, files=None):
             c = os.path.join(work, "src-" + os.path.basename(s))
             _safe_write(c, text)
             copies.append(c)
+        # what pandoc will read, read the same way (all files joined): metadata that would inject or redirect the
+        # bibliography or the style, raw TeX/OpenXML/HTML bibliographies, and every citation key
+        sc = citations.scan_document([read_text(c) for c in copies], fmt=(safe.get("from") or "markdown"))
+        if sc["meta_bad"] or sc["raw_bad"]:
+            raise RkError(tr(feedback_lang(proj),
+                "書き出さなかった: 原稿の中(front matter に限らず、本文の途中の YAML の塊も)に、文献一覧や書式を差し替えうる指定がある(%s)。"
+                "文献一覧は台帳(sources/register.csv)から作り、書式は pandoc/ の設定で決める。その指定を消す。"
+                % ", ".join(sc["meta_bad"] + sc["raw_bad"][:3]),
+                "Not exported: the manuscript (front matter or a YAML block anywhere in the body) has metadata or raw markup that "
+                "could replace the bibliography or its style (%s). The bibliography is built from the ledger (sources/register.csv) "
+                "and the style from the pandoc/ settings. Remove it." % ", ".join(sc["meta_bad"] + sc["raw_bad"][:3])))
+        keys = set(sc["keys"])
+        probs = citations.problems(proj, keys)
+        if probs and not sample:
+            raise RkError(tr(feedback_lang(proj),
+                "書き出さなかった: 原稿が引く文献のうち、台帳にない・IDENTITY_CONFIRMED 未満・台帳の行に書き出しに要る欄(題名と、著者・編者・発行者のどれか)が無いものがある(%s)。"
+                "rk.py refcheck check で確かめるか、引用から外す。文献一覧は台帳の記録だけから作る(sources/references.json は使わない)。"
+                % ", ".join("%s(%s)" % kv for kv in probs[:8]),
+                "Not exported: cited works are missing from the ledger, below IDENTITY_CONFIRMED, or their ledger row lacks a field "
+                "needed to print them (a title and an author, editor or issuer) (%s). Check them with rk.py refcheck check, or remove "
+                "the citations. The bibliography is built from the ledger only (sources/references.json is not used)."
+                % ", ".join("%s (%s)" % kv for kv in probs[:8])))
+        if probs:
+            warns.append("見本の書き出し: 台帳で確かめていない引用 %s は文献一覧に出ない" % ", ".join(k for k, _w in probs[:8]))
+        items, _bad = citations.csl_items(proj, keys, star=sc["star"])
+        gen = os.path.join(work, "bibliography.json")
+        with open(gen, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False)
+        safe["bibliography"] = gen
+        csl = safe.get("csl")
+        if not csl:
+            r0 = subprocess.run(["pandoc", "--print-default-data-file", "default.csl"], cwd=work, capture_output=True, timeout=60)
+            if r0.returncode == 0 and r0.stdout:
+                csl = os.path.join(work, "default.csl")
+                with open(csl, "wb") as f:
+                    f.write(r0.stdout)
+                safe["csl"] = csl
+        md = dict(safe.get("metadata") or {})
+        md.update({"references": [], "bibliography": gen})
+        if csl:
+            md["csl"] = csl
+        safe["metadata"] = md
         ext = {"docx": "docx", "pdf": "pdf", "latex": "tex"}[fmt]
         stem = "manuscript" if not files else os.path.splitext(os.path.basename(files[0]))[0]
+        if sample:
+            stem += "-sample"
+            warns.append("manuscript/ の外のファイルの書き出しは見本として扱い、名前に -sample を付けた / a file outside manuscript/ is exported as a sample (-sample)")
         target = out or os.path.join(bdir, "%s.%s" % (stem, ext))
         produced = os.path.join(work, "out." + ext)
         safe_defaults = os.path.join(work, "defaults.json")  # built by the plugin, not the project's file

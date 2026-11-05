@@ -3,7 +3,7 @@ from: markdown+east_asian_line_breaks
 to: pdf
 pdf-engine: lualatex
 citeproc: true
-bibliography: sources/references.json
+# 文献一覧は書き出しのたびに台帳(sources/register.csv)から作る。ここでは bibliography を指定しない
 variables:
   documentclass: ltjsarticle   # または jlreq(LuaLaTeX + LuaTeX-ja。TeX Live の collection-langjapanese に含まれる)
   papersize: a4

@@ -569,6 +569,34 @@ def cmd_optout(proj):
     return 0
 
 
+def cmd_figures(proj):
+    """Figures without a source: the student marks those that need none (a light confirmation bound to the
+    sentence; the AI cannot write it). Anything that states a fact found elsewhere needs a citation instead."""
+    term = start(proj, "出典のない数字を確かめる", "Check figures without a source")
+    items_all = subjects.figures(proj)
+    from . import verification
+    marks = verification.figure_marks(proj)
+    cs = [s for s in items_all if marks.get(s.sid) != s.digest]
+    if not cs:
+        term.say(term.t("出典の無い数字は無い。", "No figures without a source."))
+        return 0
+    term.say(term.t("出典の要らない数字(自分の調査の設計、例、文書の構成など)だけに y を押す。事実として他から得た数字には、引用かデータの参照を付ける。"
+                    "文が変わると、この確認は外れる。",
+                    "Press y only for figures that need no source (your own study design, an example, the structure of the text). A figure "
+                    "taken from elsewhere needs a citation or a data reference. The mark is dropped when the sentence changes."))
+    items = []
+    for s in cs:
+        c = s.content
+        term.say("\n%s:%d 「%s」\n  %s" % (c["file"], c["line"], c["token"], c["sentence"]))
+        k = term.key(term.t("  出典は要らない? [y]はい [s]保留 [q]ここまで > ", "  needs no source? [y]es [s]kip [q]stop > "), "ysq")
+        if k == "q":
+            break
+        if k == "y":
+            items.append({"kind": "figure", "id": s.sid, "decision": "no_source_needed", "digest": s.digest})
+    finish(proj, term, items)
+    return 0
+
+
 def cmd_sign(proj, kind, sid, decision, note=""):
     term = start(proj, "一件を署名する(%s %s)" % (kind, sid), "Sign one item (%s %s)" % (kind, sid))
     s = subjects.find(proj, kind, sid)
@@ -663,6 +691,8 @@ def run_human(cmd, proj, a):
             return cmd_signoff(proj)
         if cmd == "optout":
             return cmd_optout(proj)
+        if cmd == "figures":
+            return cmd_figures(proj)
         if cmd == "sign":
             return cmd_sign(proj, a.kind, a.id, a.decision, a.note or "")
         if cmd == "trust":

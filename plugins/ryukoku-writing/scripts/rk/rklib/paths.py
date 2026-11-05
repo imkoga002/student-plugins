@@ -30,7 +30,7 @@ RULES = (
     ("statement", ("*/disclosure/statement*.md",)),
     ("disclosure", ("*/disclosure/*", "*/disclosure")),
     ("annotations", ("*/review/annotations.json", "*/review/annotations-log.jsonl")),
-    ("ledger", ("*/sources/register.csv", "*/sources/claims.csv")),
+    ("ledger", ("*/sources/register.csv", "*/sources/claims.csv", "*/sources/identity.json")),
     ("bibliography", ("*/sources/references.json",)),
     ("raw", ("*/data/raw/*",)),
     ("ci", ("*/.github/*", "*/.githooks/*", "*/.git/hooks/*", "*/.github", "*/.githooks")),
@@ -48,7 +48,7 @@ PROTECTED = {"statehome", "claude", "runconfig", "startup", "manuscript", "ryuko
 # file names that are protected wherever the directory is unknown (a cd the scanner could not follow)
 PROTECTED_NAMES = {"signoffs.jsonl", "provenance.jsonl", "ai-use-log.jsonl", "config.yml", "signers.json", "style.yml",
                    "questions.md", "search-log.jsonl", "annotations.json", "annotations-log.jsonl", "register.csv",
-                   "claims.csv", "references.json", "log.md", "rq-worksheet.md", "root-changes.jsonl", "rk", "rk.cmd",
+                   "claims.csv", "identity.json", "references.json", "log.md", "rq-worksheet.md", "root-changes.jsonl", "rk", "rk.cmd",
                    "rk.ps1", "main.md", "check.yml", "pre-commit", "pre-push"}
 
 

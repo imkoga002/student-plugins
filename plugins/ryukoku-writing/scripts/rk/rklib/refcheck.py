@@ -214,7 +214,39 @@ def judge(ref, item, registry="crossref"):
         status = "CANDIDATE"
     else:
         status = "IDENTITY_CONFIRMED"
-    return {"status": status, "details": details, "notes": notes}
+    out = {"status": status, "details": details, "notes": notes}
+    if status == "IDENTITY_CONFIRMED":
+        out["meta"] = registry_meta(item)
+    return out
+
+
+def _names(lst):
+    out = []
+    for a in lst or []:
+        if not isinstance(a, dict):
+            continue
+        d = {k: str(a[k]) for k in ("family", "given", "literal") if a.get(k)}
+        if d:
+            out.append(d)
+    return out
+
+
+def registry_meta(item):
+    """The bibliographic fields of a registry record (Crossref / DataCite as read above), as recorded at the identity
+    check. The export renders the bibliography from these (citations.csl_items), never from a file the AI can edit."""
+    def one(v):
+        if isinstance(v, list):
+            return str(v[0]) if v else ""
+        return str(v or "")
+    meta = {"title": one(item.get("title")), "author": _names(item.get("author")), "editor": _names(item.get("editor"))}
+    fy = first_year(item)
+    if fy:
+        meta["year"] = fy
+    for k in ("container-title", "publisher", "volume", "issue", "page", "type", "DOI"):
+        v = one(item.get(k))
+        if v:
+            meta[k] = v
+    return {k: v for k, v in meta.items() if v}
 
 
 def datacite_item(attrs):
@@ -276,6 +308,7 @@ def judge_cinii(data, ident, kind, claimed_title):
     titles = _titles_of(hit)
     if claimed_title and any(titles_match(claimed_title, t) for t in titles):
         return {"status": "IDENTITY_CONFIRMED", "reason": "%s_found_title_matched" % kind,
+                "meta": {"title": next(t for t in titles if titles_match(claimed_title, t))},
                 "notes": ["撤回の状況: 未確認(CiNii は対象外)", "CiNii Books の items[].title は開発時に観察した項目名(CiNii Research は appid がなく未観察)。画面でも確認すること"]}
     return {"status": "CANDIDATE", "reason": "%s_found_title_not_compared" % kind,
             "notes": ["識別子は検索結果にあるが、題名を照合できなかった(応答の項目名が未確認、または題名が違う)。画面で確認する"]}
@@ -295,6 +328,7 @@ def judge_ndl(xml_text, ndl_id, claimed_title):
                 "notes": ["題名で検索した NDL サーチの結果に指定の ID が見つからない。NDL サーチの画面で確認する"]}
     if claimed_title and any(titles_match(claimed_title, x) for x in titles):
         return {"status": "IDENTITY_CONFIRMED", "reason": "ndl_found_title_matched", "hits": n,
+                "meta": {"title": next(x for x in titles if titles_match(claimed_title, x))},
                 "notes": ["撤回の状況: 未確認(NDL は対象外)", "DC-NDL の dc:title(rdf:value)を読んだ(recordSchema=dcndl の形は開発時に観察)"]}
     return {"status": "CANDIDATE", "reason": "ndl_found_title_not_compared", "hits": n,
             "notes": ["ID は見つかったが題名を照合できなかった。画面で確認する"]}

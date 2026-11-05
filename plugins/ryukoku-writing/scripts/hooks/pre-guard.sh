@@ -217,20 +217,32 @@ case "$TOOL" in
     exit 0 ;;
 
   *)
-    if [ "$KIND" = other ]; then
-      # an unknown tool (an MCP server, a newer built-in): every string value that looks like a path (whatever its
-      # field is called: path, filename, destination, ...) is matched like a Write target; content-like fields are not
-      UPATHS="$(printf '%s' "$INPUT" | tool_input_paths)"
+    if [ "$TOOL" != Bash ]; then
+      # an unknown tool (an MCP server, a newer built-in, PowerShell, Monitor, ...): every string in tool_input that
+      # may name a file (nested objects and arrays included; hookcore toolpaths parses the JSON) is matched like a
+      # Write target; content-like fields are not. A tool with a "command" is checked as a shell command below too.
+      if have_python; then
+        UPATHS="$(printf '%s' "$INPUT" | pyrun -I -B "$RK_HOOKCORE" toolpaths 2>/dev/null || printf 'R\t(toolpaths failed)')"
+      else
+        UPATHS="$(printf '%s' "$INPUT" | tool_input_paths | LC_ALL=C sed 's/^/?	/')"
+      fi
+      UREL=""
       OLDIFS="$IFS"; IFS='
 '
-      for UFP in $UPATHS; do
+      for ULINE in $UPATHS; do
         IFS="$OLDIFS"
+        UK="${ULINE%%	*}"; UFP="${ULINE#*	}"
         [ -n "$UFP" ] || continue
+        case "$UK" in
+          R) UREL="$UFP" ;;
+          \?) case "$UFP" in /*|~*|[A-Za-z]:*) : ;; *) UREL="$UFP" ;; esac ;;
+        esac
         UA="$(abs_of "$UFP" "$BASE")"
         UPP="$(phys_file "$UA")"; [ -n "$UPP" ] || UPP="$UA"
         case "$(norm_path "$UA")" in "$PR_N"/*) deny_class plugin ;; esac
         UC="$(path_class "$(rel_norm "$(phys_dir "$PROJ" 2>/dev/null || printf '%s' "$PROJ")" "$UPP")")"
         [ "$UC" = other ] && UC="$(path_class "$(rel_norm "$PROJ" "$UA")")"
+        [ "$UC" = other ] && UC="$(path_class "$UFP")"
         case "$UC" in
           manuscript|ryukoku|tools|questions|searchlog|thinking|disclosure|annotations|ledger|raw|statehome|claude|runconfig|startup|ci|pandoc) deny_class "$UC" ;;
           bibliography) policy_gate verify block ;;
@@ -241,7 +253,14 @@ case "$TOOL" in
 '
       done
       IFS="$OLDIFS"
-      guard_pre; exit 0
+      if [ -n "$UREL" ]; then
+        # a relative path in a tool's input: what it is relative to is the tool's business, not known here
+        case "$POLICY" in
+          prohibited|unreadable) deny_out "$(t "道具の入力に相対パス($UREL)がある。どこを指すか分からず、この科目は AI 利用禁止と記録されている(または設定を読めない)ので止めた。絶対パスで指定する。" "The tool input has a relative path ($UREL); where it points is unknown, and this course is recorded as AI-prohibited (or the settings cannot be read), so it is blocked. Use an absolute path.")" ;;
+          *) ask_out "$(t "道具の入力に相対パス($UREL)がある。どこを指すか分からない。守られた場所(原稿・記録)でないことを確かめてから許可する。" "The tool input has a relative path ($UREL); where it points is unknown. Allow only after checking it is not a protected place (manuscript, records).")" ;;
+        esac
+      fi
+      if [ "$KIND" = other ]; then guard_pre; exit 0; fi
     fi
     CMD="$CMD0"
     [ -n "$CMD" ] || { guard_pre; exit 0; }

@@ -134,5 +134,5 @@ https://github.com/lierdakil/pandoc-crossref).
 
 ```text
 In-text: [@key, p. 12] / several: [@key1; @key2] / author in text: @key argues ...
-key = the id in sources/references.json (CSL-JSON). Add only sources you have read and checked.
+key = the citekey or id in the ledger (sources/register.csv). The bibliography is built from the ledger at each export; only IDENTITY_CONFIRMED works appear.
 ```

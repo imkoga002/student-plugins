@@ -107,6 +107,15 @@ def config_problems(proj):
         v = pl[0].split(":", 1)[1].strip(" \t\r")
         out.append("ai_policy の行 %r は「ai_policy: allowed」の形(値は allowed・limited・prohibited・unknown の小文字、余分な文字なし)ではない / "
                    "the ai_policy line %r is not of the form 'ai_policy: allowed' (one of the four lower-case values, nothing else)" % (v, v))
+    try:
+        from . import msguard
+        ids = msguard.config_detections_open(proj)
+    except Exception:  # noqa: BLE001 - the check itself must not open the gate
+        ids = []
+    if ids:
+        out.append("AI のツールの実行中に .ryukoku/config.yml が変わった(検知 %s)。学生が ./rk changes で判断するまで、設定は信用しない / "
+                   ".ryukoku/config.yml changed during an AI tool call (detection %s); the settings are not trusted until you decide with ./rk changes"
+                   % (", ".join(ids[:3]), ", ".join(ids[:3])))
     return out
 
 
@@ -380,6 +389,62 @@ class FileLock(object):
                 os.remove(self.path)
             except OSError:
                 pass
+
+
+class ExclusiveLock(object):
+    """An exclusive lock held for a whole read-modify-write: fcntl.flock on POSIX, msvcrt.locking on Windows (both
+    are released by the system if the process dies, so no stale-lock takeover is needed); FileLock (O_EXCL) where
+    neither exists. Waits up to TIMEOUT seconds, then raises RkError (the caller fails closed)."""
+
+    def __init__(self, path, timeout=15.0):
+        self.path, self.timeout, self.f, self.fallback = path, timeout, None, None
+
+    def __enter__(self):
+        import time
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        try:
+            import fcntl
+        except ImportError:
+            fcntl = None
+        try:
+            import msvcrt
+        except ImportError:
+            msvcrt = None
+        if fcntl is None and msvcrt is None:
+            self.fallback = FileLock(self.path + ".x", self.timeout)
+            self.fallback.__enter__()
+            return self
+        self.f = open(self.path, "a+b")
+        t0 = time.time()
+        while True:
+            try:
+                if fcntl is not None:
+                    fcntl.flock(self.f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                else:
+                    self.f.seek(0)
+                    msvcrt.locking(self.f.fileno(), msvcrt.LK_NBLCK, 1)
+                return self
+            except OSError:
+                if time.time() - t0 > self.timeout:
+                    self.f.close()
+                    raise RkError("ロックを取れない: %s" % self.path)
+                time.sleep(0.02)
+
+    def __exit__(self, *a):
+        if self.fallback is not None:
+            return self.fallback.__exit__(*a)
+        try:
+            try:
+                import fcntl
+                fcntl.flock(self.f.fileno(), fcntl.LOCK_UN)
+            except ImportError:
+                import msvcrt
+                self.f.seek(0)
+                msvcrt.locking(self.f.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        finally:
+            self.f.close()
 
 
 # ---------------------------------------------------------------- where the plugin is

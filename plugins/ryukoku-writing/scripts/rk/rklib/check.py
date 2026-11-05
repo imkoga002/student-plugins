@@ -29,7 +29,7 @@ from .common import feedback_lang, load_config, manuscript_files, read_text, rel
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS_ROOT = os.path.dirname(HERE)  # .../scripts/rk (plugin) or .../tools/rk (project copy)
 MANIFEST = "MANIFEST.sha256"
-GUARDED_IN_PR = ("tools", "rk", "rk.cmd", "rk.ps1", ".github", ".githooks")
+GUARDED_IN_PR = ("tools", "rk", "rk.cmd", "rk.ps1", ".github", ".githooks", "pandoc")
 
 
 class Report(object):
@@ -253,11 +253,13 @@ def check_searchlog(proj, rep):
 
 
 def check_citations(proj, idx, rep, stage):
-    """Every bibliography entry the manuscript would render ([@key], @{key}, nocite, nocite '@*'; keys by pandoc's rule,
-    Unicode letters included, and at submission also as pandoc itself reads them) must be in the ledger at
-    IDENTITY_CONFIRMED (an error at submission, a warning while drafting), its entry in sources/references.json must
-    say what the ledger says (identifier, title, year, authors: always an error), and at submission each must be
-    signed VERIFIED by the student. Author-year mentions in plain prose cannot be checked (README)."""
+    """Every work the manuscript cites ([@key], @{key}, nocite, nocite '@*' = every qualifying ledger row; keys by
+    pandoc's rule, and at submission also as pandoc itself reads all files joined) must be a ledger row at
+    IDENTITY_CONFIRMED with a title and a name (an error at submission, a warning while drafting); metadata anywhere in
+    the manuscript that would inject or redirect the bibliography or the style, and raw TeX/OpenXML/HTML
+    bibliographies, are errors at submission; at submission each cited work must be signed VERIFIED by the student.
+    The export prints the bibliography from the ledger (citations.py), so sources/references.json only gets an
+    informational comparison. Author-year mentions in plain prose cannot be checked (README)."""
     from . import citations
     texts = []
     for p in manuscript_files(proj):
@@ -265,14 +267,15 @@ def check_citations(proj, idx, rep, stage):
         texts.append(text)
         if criticmarkup.has_markup(text):
             (rep.err if stage == "submit" else rep.warn)(rep.t("CriticMarkup の記号が原稿に残っている: %s", "CriticMarkup marks remain in the manuscript: %s") % rel(proj, p))
-    keys, star = citations.rendered(proj, texts, use_pandoc=(stage == "submit"))
+    sc = citations.scan_document(texts, use_pandoc=(stage == "submit"))
+    keys, star = set(sc["keys"]), sc["star"]
+    if star:
+        keys |= set(citations.qualifying(proj))
     bad = (rep.err if stage == "submit" else rep.warn)
-    for p, text in zip(manuscript_files(proj), texts):
-        ov = citations.front_matter_overrides(text)
-        if ov:
-            bad(rep.t("%s の front matter に %s がある。文献一覧は sources/references.json だけから作る(書き出しはこの指定を受け付けない)",
-                      "%s sets %s in its front matter. The bibliography comes from sources/references.json only (export refuses this)")
-                % (rel(proj, p), ", ".join(ov)))
+    if sc["meta_bad"] or sc["raw_bad"]:
+        bad(rep.t("原稿の中(本文の途中の YAML の塊を含む)に、文献一覧や書式を差し替えうる指定がある: %s。文献一覧は台帳から作り、書式は pandoc/ の設定で決める(書き出しは拒む)",
+                  "the manuscript (including YAML blocks in the body) has metadata or raw markup that could replace the bibliography or its style: %s. "
+                  "The bibliography is built from the ledger and the style from pandoc/ (export refuses this)") % ", ".join(sc["meta_bad"] + sc["raw_bad"][:3]))
     probs = citations.problems(proj, keys)
     unknown = [k for k, why in probs if why == "not_in_ledger"]
     if unknown:
@@ -282,15 +285,24 @@ def check_citations(proj, idx, rep, stage):
     for k, why in probs:
         if why == "not_in_ledger":
             continue
-        if why.startswith("mismatch:"):
-            rep.err(rep.t("引用 %s の文献一覧の項目(sources/references.json)が台帳と違う(%s)。書き出される文献は、識別子で確かめた台帳の記録と同じでなければならない。"
-                          "references.json の項目を台帳に合わせる(台帳の誤りなら rk.py refcheck check で確かめ直す)",
-                          "The bibliography entry of %s (sources/references.json) differs from the ledger (%s). A printed entry must say what the "
-                          "ledger record, checked against the identifier, says. Fix the entry (or re-check the ledger with rk.py refcheck check)")
-                    % (k, why.split(":", 1)[1]))
+        if why.startswith("missing:") or why == "identity_stale":
+            bad(rep.t("引用 %s の台帳の行から文献一覧の項目を作れない(%s)。題名と、著者・編者・発行者のどれかが要る(識別子の照合の記録が古いときは rk.py refcheck check をやり直す)",
+                      "the ledger row of %s cannot be printed (%s): it needs a title and an author, editor or issuer (re-run rk.py refcheck check if the identity record is stale)") % (k, why))
             continue
         bad(rep.t("引用 %s の台帳の状態が %s(IDENTITY_CONFIRMED 未満)。rk.py refcheck check で識別子を確かめる(識別子が無ければ NCID・NDL ID などを台帳に足す)か、使わない",
                   "%s has ledger state %s (below IDENTITY_CONFIRMED). Check its identifier with rk.py refcheck check (add an NCID, NDL ID or the like if it has none), or do not cite it") % (k, why))
+    # informational: sources/references.json is not printed; say where it differs from what the export prints
+    bib = citations.bibliography(proj)
+    q = citations.qualifying(proj)
+    diff = []
+    for k in sorted(keys):
+        if k in bib and k in q:
+            mm = citations.entry_mismatches(q[k], bib[k])
+            if mm:
+                diff.append("%s(%s)" % (k, ",".join(mm)))
+    if diff:
+        rep.note(rep.t("sources/references.json の項目が台帳と違う(書き出しでは使わず、台帳から作る): %s",
+                       "entries in sources/references.json differ from the ledger (export does not use them; it prints the ledger): %s") % ", ".join(diff[:6]))
     if stage == "submit":
         by_key = {}
         for r in ledger.read(ledger.paths(proj)[0], ledger.REGISTER):
@@ -306,20 +318,25 @@ def check_citations(proj, idx, rep, stage):
 
 
 def check_numbers(proj, rep, stage="draft"):
-    """A figure (a number with a unit, or a decimal) in a paragraph with no citation, no data reference (data/raw|
-    processed/... in the paragraph or its footnote) and no entry in data/numeric-claims.csv: a warning while drafting,
-    an error at submission."""
+    """A figure (verification.figures: every number in body prose but a short list of exempt forms) in a sentence
+    with no citation and no reference to an existing data file (in the sentence or its footnote), not in
+    data/numeric-claims.csv and not marked by the student as needing no source (./rk figures): a warning while
+    drafting, an error at submission."""
     n = 0
     say = rep.err if stage == "submit" else rep.warn
+    marks = verification.figure_marks(proj)
     for p in manuscript_files(proj):
         relp = rel(proj, p)
-        for ln, tok in verification.numbers_without_source(proj, read_text(p), relp):
+        for ln, tok, _s, _subj, _d in verification.unsourced_figures(proj, read_text(p), relp, marks=marks):
             n += 1
             if n <= 8:
-                say(rep.t("%s:%d の数字「%s」に、出典の引用もデータファイルへの参照(data/...・data/numeric-claims.csv)もない",
-                               "%s:%d: the figure \"%s\" has neither a citation nor a data reference (data/..., data/numeric-claims.csv)") % (relp, ln, tok))
+                say(rep.t("%s:%d の数字「%s」の文に、出典の引用もデータファイルへの参照(data/... の実在するファイル・data/numeric-claims.csv)もない",
+                          "%s:%d: the sentence of the figure \"%s\" has neither a citation nor a data reference (an existing data/... file, data/numeric-claims.csv)") % (relp, ln, tok))
     if n > 8:
         say(rep.t("出典のない数字がほかに %d 件(rk.py lint で全部)", "%d more figures without a source (rk.py lint lists them all)") % (n - 8))
+    if n:
+        rep.note(rep.t("出典の要らない数字(自分の調査の設計・例・文書の構成など)は、自分の端末の ./rk figures で一件ずつ印を付けられる(文が変わると外れる)",
+                  "Figures that need no source (your own study design, an example, the structure of the text) can be marked one by one with ./rk figures in your terminal (the mark is dropped when the sentence changes)"))
 
 
 def check_cards(proj, rep):

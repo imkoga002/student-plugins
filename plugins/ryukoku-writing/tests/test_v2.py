@@ -115,7 +115,7 @@ class Project(unittest.TestCase):
     def setUp(self):
         self.E = Env()
         self.E.setup()  # allowed, passphrase registered
-        self.E.rk("ledger", "add-source", "--doi", "10.1038/s41598-023-41032-5", "--title", "A placeholder title", "--year", "2023",
+        self.E.rk("ledger", "add-source", "--doi", "10.1038/s41598-023-41032-5", "--title", "A placeholder title", "--year", "2023", "--authors", "Sato, Ken",
                   "--citekey", "w2023")
         self.E.post("Bash", {"command": "true"}, tuid="init")
 
@@ -430,14 +430,15 @@ class Hardening(unittest.TestCase):
         E = Env()
         try:
             E.setup()
-            E.rk("ledger", "add-source", "--doi", "10.1038/s41598-023-41032-5", "--title", "A placeholder title", "--year", "2023",
+            E.rk("ledger", "add-source", "--doi", "10.1038/s41598-023-41032-5", "--title", "A placeholder title", "--year", "2023", "--authors", "Sato, Ken",
                  "--citekey", "w2023")
             set_ledger(E, "IDENTITY_CONFIRMED")
             with open(E.path("sources", "references.json"), "w", encoding="utf-8") as f:
                 json.dump([{"id": "w2023", "type": "article"}, {"id": "ghost1999", "type": "book"}], f)
             t = E.read(MS).replace("---\n\n", "---\n\n", 1)
             t = t.replace('author:', "nocite: '@*'\nauthor:", 1)
-            open(E.path(MS), "w", encoding="utf-8").write(t + "\n本文 [@{w2023}]。\n")
+            # nocite '@*' renders the qualifying ledger rows (not references.json); a cited key outside the ledger fails
+            open(E.path(MS), "w", encoding="utf-8").write(t + "\n本文 [@{w2023}] と [@ghost1999]。\n")
             ng = [l for l in E.rk("check", "--submit").stdout.splitlines() if l.startswith("NG")]
             self.assertTrue(any("ghost1999" in l for l in ng), ng)
             r = E.rk("export", "docx")
