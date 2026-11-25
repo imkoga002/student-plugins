@@ -4,6 +4,8 @@
 
 ## 導入
 
+パソコンに詳しくない人は、[ryukoku-writing の使い方](plugins/ryukoku-writing/README.md)の「入れ方」を見てください。画面のボタンだけで入れられます。端末(コマンド)に慣れている人は、次のようにも入れられます。
+
 ```
 /plugin marketplace add imkoga002/student-plugins
 ```

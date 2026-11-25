@@ -227,8 +227,9 @@ class AllowList(unittest.TestCase):
             E.cleanup()
 
     def test_claim_in_docs_matches_the_check(self):
-        """The README and the disclosure say a proposal cannot change words or numbers; that must stay true."""
-        readme = open(os.path.join(PLUGIN, "README.md"), encoding="utf-8").read()
+        """The technical description (TECHNICAL.md, formerly the README) says a proposal cannot change words or
+        numbers; that must stay true."""
+        readme = open(os.path.join(PLUGIN, "TECHNICAL.md"), encoding="utf-8").read()
         self.assertIn("語・数字", readme)
         for kind, old, new in REFUSED[:10]:
             self.assertFalse(check_hunk(kind, [old], [new], proj=self.E.proj)[0])
