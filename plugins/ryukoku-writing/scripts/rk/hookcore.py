@@ -146,6 +146,35 @@ def main(argv):
         from rklib.common import config_problems, course_policy
         probs = config_problems(proj)
         print("ok\t%s" % course_policy(proj) if not probs else "bad\t%s" % probs[0].replace("\t", " ").replace("\n", " ")[:200])
+    elif cmd == "docs":
+        # the Claude Docs guard (rklib/docsguard.py): argv = docs PROJECT pre|post, the hook input on stdin
+        from rklib import docsguard
+        from rklib.common import feedback_lang
+        try:
+            obj = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            obj = {}
+        if not isinstance(obj, dict):
+            obj = {}
+        event = argv[2] if len(argv) > 2 else ""
+        tool, ti = obj.get("tool_name", ""), obj.get("tool_input") or {}
+        en = feedback_lang(proj) == "en"
+        if event == "pre":
+            try:
+                r = docsguard.pre(proj, tool, ti)
+            except Exception as e:  # noqa: BLE001 - fail closed on the registered document
+                r = ("deny", "Docs の守りの検査で内部の誤り(%s)。安全のため止めた。" % type(e).__name__,
+                     "Internal error in the Docs guard (%s); denied to be safe." % type(e).__name__) \
+                    if docsguard.tool_kind(tool)[0] == "docs" and docsguard.load(proj) else None
+            if r:
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": r[0],
+                                                         "permissionDecisionReason": "[ryukoku-writing] " + (r[2] if en else r[1])}},
+                                 ensure_ascii=False))
+        elif event == "post":
+            note = docsguard.post(proj, tool, ti, obj.get("tool_response"), obj.get("tool_use_id", ""))
+            if note:
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": note}},
+                                 ensure_ascii=False))
     elif cmd == "turnend":
         msguard.turn_end(proj)
     elif cmd == "session":

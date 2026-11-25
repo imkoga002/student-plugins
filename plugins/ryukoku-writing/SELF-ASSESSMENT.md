@@ -2,6 +2,23 @@
 
 実行した結果だけで書く。設計は [DESIGN.md](DESIGN.md)。「開発時の観察」「未確認」「独立検証」の意味は DESIGN.md の冒頭と同じ。v1(1.0.0)の結果は、v1 の版のこの文書と同じ内容で、ここでは v2 で回したものだけを書く。
 
+## 0. 3.0 への移行の観察(作業中、2026-11-25)
+
+3.0 は、端末のコマンドと合言葉をなくし、Claude Docs の文書で執筆する形に移る(計画: 学生は画面のコメントで判断し、フックは AI がその判断を代わりに行えないようにする)。中心の仕組みが成り立つかを、実装の前に観察した。ここに書くのは観察した事実だけで、公式の仕様として確かめたものではない。
+
+| 観察 | 結果 | どう確かめたか |
+|---|---|---|
+| AI が付けたコメントと提案の記録 | `actor.via: "mcp"`、`principal` は学生と同じアカウント | Claude Docs の `query` と `read {kind: suggestions}` の応答 |
+| 学生が画面で付けたコメントの記録 | `actor.via: "frame"`、`actor.self: true`、`principal` は同じ | 学生が試験用の文書に「確認」と返信し、`query` で読んだ |
+| 学生が ✓ で受け入れた提案 | 一覧から消え、承認者は残らない(仕様どおり) | ✓ の後の `read {kind: suggestions}` が空。本文は提案の文になった |
+| 学生が画面で直接足した語 | 文字の塊の id の頭が、AI の書き込みの `session`(ack に出る)と違う | `read {kind: view, sinceRev}`。文書にない挙動なので補助にだけ使う |
+| プラグインの PreToolUse が MCP のツールを止められるか | 止められる。拒否した呼び出しはサーバーに届かず、`--allowedTools` で事前に許可していても拒否が勝つ | `claude -p`(Claude Code 2.1.332、Linux)と、名前の付け方を真似た代わりの MCP サーバー(本物の Claude Docs ではない) |
+| PostToolUse が受け取る MCP の応答の形 | `tool_response` は `[{"type":"text","text":"<JSON>\n\n<説明文>"}]` | 同じ代わりのサーバー |
+| 7 タブの文書を一回の `batch` で作り、`read` の応答で登録できるか | できる。タブの名前は `value.tabs`、本文の id は `files[].content.id` | 本物の Claude Docs で作り、その応答をフックに通した |
+| Docs の `export` の docx | ファイルではなく base64 の文字列でツールの結果に返る | 本物の Claude Docs。書き写すと壊れうるので、組版は Markdown → pandoc を主にする |
+
+まだ観察していないこと: Cowork でフックが Docs のツールを止められるか。ブラウザや画面の操作の道具で押した ✓ やコメントがどう記録されるか。本物の Claude Docs のツールをフックで止めること(代わりのサーバーでだけ確かめた)。
+
 ## 1. 試験の環境
 
 - 2026-11-05(v2 の開発): Linux、Python 3.13.18、pandoc 3.1.3(引用キーの読み取りを pandoc 自身と比べる試験はこの版で回した)、Node 22 と Playwright(Chromium)、Claude Code 2.1.318。**lualatex・mmdc・bubblewrap は無い**。`tests/run.sh` は HOME と TMPDIR を一時フォルダに向けて実行した。

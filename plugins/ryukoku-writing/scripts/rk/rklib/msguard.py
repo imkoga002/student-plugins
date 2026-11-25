@@ -65,11 +65,16 @@ WINDOW_STALE = 6 * 3600
 TREES = ("tools", "thinking", "disclosure", ".github", ".githooks", "pandoc")
 FILES = (".ryukoku/config.yml", ".ryukoku/signers.json", ".ryukoku/style.yml", "research/questions.md",
          "rk", "rk.cmd", "rk.ps1", ".claude/settings.json", ".claude/settings.local.json",
-         "sources/register.csv", "sources/claims.csv", "sources/identity.json", "review/annotations.json")
+         "sources/register.csv", "sources/claims.csv", "sources/identity.json", "review/annotations.json",
+         ".ryukoku/docs.json", ".ryukoku/docs-threads.json")
 # files the plugin's own code rewrites as a whole (ledger.write, record_identity, the annotation store): a change
 # during an AI tool call is explained only when the file now has a content the plugin's code wrote (note_written_file)
-PLUGIN_REWRITTEN = ("sources/register.csv", "sources/claims.csv", "sources/identity.json", "review/annotations.json")
-APPEND_ONLY = ("research/search-log.jsonl", "review/annotations-log.jsonl", ".ryukoku/provenance.jsonl")
+# 3.0: .ryukoku/config.yml is written only by the plugin's code (the Docs hook records the course policy from the
+# student's page comment, docsguard._record_comments), so it joins this list.
+PLUGIN_REWRITTEN = (".ryukoku/config.yml", "sources/register.csv", "sources/claims.csv", "sources/identity.json", "review/annotations.json",
+                    ".ryukoku/docs.json", ".ryukoku/docs-threads.json")
+APPEND_ONLY = ("research/search-log.jsonl", "review/annotations-log.jsonl", ".ryukoku/provenance.jsonl",
+               ".ryukoku/decisions.jsonl", ".ryukoku/docs-provenance.jsonl")
 SKIP_SCAN = {".git", "node_modules", "__pycache__", ".venv", "venv", ".rk-base"}
 
 
