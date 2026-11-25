@@ -2,22 +2,82 @@
   "description": "ryukoku-writing: active only for a folder that carries .ryukoku/config.yml (found from the target path, the session folder or one or two levels below it). Manuscript writes follow the course AI policy (allowed: allowed and recorded as provenance per paragraph; limited/unknown: ask; prohibited: deny; a recognised shell write form is denied, any other command that may write asks). Deny AI writes to .ryukoku/ (records, provenance, settings), the tools, CI and Git hooks, the export settings (pandoc/), the student's questions and thinking log, with every tool including Bash; detect changes to protected files made during AI tool calls (msguard) and log them in the chained AI-use log; run the mechanical verification after a manuscript write; stop prompts that contain personal data; add the course policy and the drafting rules to writing requests; log searches automatically.",
   "hooks": {
     "SessionStart": [
-      { "matcher": "startup|resume|clear|compact",
-        "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.sh\"", "timeout": 20 } ] }
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.sh\"",
+            "timeout": 20
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/prompt-guard.sh\"", "timeout": 10 } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/prompt-guard.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "matcher": "*",
-        "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-guard.sh\"", "timeout": 20 } ] }
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-guard.sh\"",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*Claude_Docs__.*|mcp__claude-in-chrome__.*|mcp__.*Claude_Browser__.*|mcp__.*computer-use__.*|computer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/docs-guard.sh\" pre",
+            "timeout": 20
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "matcher": "*",
-        "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-log.sh\"", "timeout": 20 } ] }
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-log.sh\"",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*Claude_Docs__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/docs-guard.sh\" post",
+            "timeout": 20
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-check.sh\"", "timeout": 15 } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop-check.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
